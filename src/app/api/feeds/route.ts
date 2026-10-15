@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import { getDb, saveDb } from '@/lib/db';
+import { getDb, updateDb } from '@/lib/db';
 import { FeedSource } from '@/types';
 import Parser from 'rss-parser';
 
 const parser = new Parser({ timeout: 5000 });
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
@@ -33,9 +34,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const db = await getDb();
     const newFeed: FeedSource = {
-      id: `custom-${Date.now()}`,
+      id: `custom-${crypto.randomUUID()}`,
       name: name.trim(),
       url: url.trim(),
       category: category || 'trends',
@@ -44,8 +44,9 @@ export async function POST(req: Request) {
       enabled: true,
     };
 
-    db.feeds.push(newFeed);
-    await saveDb(db);
+    await updateDb(db => {
+      db.feeds.push(newFeed);
+    });
 
     return NextResponse.json({ feed: newFeed }, { status: 201 });
   } catch (error) {
@@ -58,16 +59,15 @@ export async function PATCH(req: Request) {
     const body = await req.json();
     const { id, enabled } = body;
 
-    const db = await getDb();
-    const feed = db.feeds.find(f => f.id === id);
+    const feed = await updateDb(db => {
+      const matchingFeed = db.feeds.find(f => f.id === id);
+      if (!matchingFeed) return null;
+      if (typeof enabled === 'boolean') matchingFeed.enabled = enabled;
+      return matchingFeed;
+    });
     if (!feed) {
       return NextResponse.json({ error: 'Flux non trouvé' }, { status: 404 });
     }
-
-    if (typeof enabled === 'boolean') {
-      feed.enabled = enabled;
-    }
-    await saveDb(db);
 
     return NextResponse.json({ feed });
   } catch (error) {
@@ -84,9 +84,9 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: 'ID requis' }, { status: 400 });
     }
 
-    const db = await getDb();
-    db.feeds = db.feeds.filter(f => f.id !== id);
-    await saveDb(db);
+    await updateDb(db => {
+      db.feeds = db.feeds.filter(f => f.id !== id);
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

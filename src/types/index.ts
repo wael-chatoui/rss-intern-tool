@@ -63,6 +63,7 @@ export interface SocialContent {
 
 export interface SocialPost {
   id: string;
+  notes?: string;
   articleId?: string;
   sourceArticleTitle?: string;
   sourceArticleLink?: string;

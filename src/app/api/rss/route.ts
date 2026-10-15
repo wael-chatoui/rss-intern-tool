@@ -1,11 +1,72 @@
 import { NextResponse } from 'next/server';
-import { getDb, saveDb } from '@/lib/db';
-import { fetchAllActiveFeeds } from '@/lib/rss';
-import { RSSArticle } from '@/types';
+import { getDb, updateDb } from '@/lib/db';
+import { createArticleId, fetchAllActiveFeeds } from '@/lib/rss';
+import { DatabaseSchema, RSSArticle } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes cache
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const STABLE_ID_PATTERN = /^rss_[a-f0-9]{24}$/;
+
+function articleIdentity(article: RSSArticle): string {
+  return `${article.feedId}:${article.link || `${article.title}:${article.pubDate}`}`;
+}
+
+// Older IDs truncated the beginning of URLs, so unrelated articles shared an ID.
+// Match saved copies to their cached counterpart by source and link during migration.
+function normalizeStoredArticles(db: DatabaseSchema): boolean {
+  let changed = false;
+  const identityIds = new Map<string, string>();
+  const oldIds = new Map<string, Set<string>>();
+  const storedArticles = [...(db.cachedArticles || []), ...(db.savedArticles || [])];
+
+  for (const article of storedArticles) {
+    if (STABLE_ID_PATTERN.test(article.id)) {
+      identityIds.set(articleIdentity(article), article.id);
+    }
+  }
+
+  const normalize = (articles: RSSArticle[]) => {
+    const normalized = articles.map(article => {
+      const identity = articleIdentity(article);
+      const id = identityIds.get(identity) || createArticleId(article.feedId, article.link || `${article.title}:${article.pubDate}`);
+      identityIds.set(identity, id);
+      const replacements = oldIds.get(article.id) || new Set<string>();
+      replacements.add(id);
+      oldIds.set(article.id, replacements);
+      if (article.id !== id) changed = true;
+      return { ...article, id };
+    });
+    const unique = Array.from(new Map(normalized.map(article => [article.id, article])).values());
+    if (unique.length !== articles.length) changed = true;
+    return unique;
+  };
+
+  db.cachedArticles = normalize(db.cachedArticles || []);
+  db.savedArticles = normalize(db.savedArticles || []);
+  const readIds = Array.from(new Set((db.readArticleIds || []).flatMap(id => {
+    const replacements = oldIds.get(id);
+    return replacements ? Array.from(replacements) : [id];
+  })));
+  if (JSON.stringify(readIds) !== JSON.stringify(db.readArticleIds || [])) changed = true;
+  db.readArticleIds = readIds;
+
+  const articles = [...db.cachedArticles, ...db.savedArticles];
+  db.posts = (db.posts || []).map(post => {
+    if (!post.sourceArticleLink) return post;
+    const candidates = articles.filter(article =>
+      article.link === post.sourceArticleLink &&
+      (!post.sourceArticleFeed || article.feedName === post.sourceArticleFeed)
+    );
+    const matchingIds = new Set(candidates.map(article => article.id));
+    if (matchingIds.size !== 1) return post;
+    const articleId = candidates[0].id;
+    if (post.articleId === articleId) return post;
+    changed = true;
+    return { ...post, articleId };
+  });
+  return changed;
+}
 
 export async function GET(req: Request) {
   try {
@@ -13,67 +74,93 @@ export async function GET(req: Request) {
     const feedId = searchParams.get('feedId');
     const category = searchParams.get('category');
     const language = searchParams.get('language');
-    const query = searchParams.get('q')?.toLowerCase();
+    const query = searchParams.get('q')?.trim().toLowerCase();
     const forceRefresh = searchParams.get('refresh') === 'true';
 
-    const db = await getDb();
-    let targetFeeds = db.feeds.filter(f => f.enabled);
+    let db = await getDb();
+    let needsSave = normalizeStoredArticles(db);
+    let targetFeeds = db.feeds.filter(feed => feed.enabled);
+    const activeFeedIds = new Set(targetFeeds.map(feed => feed.id));
+    const previousCache = (db.cachedArticles || []).filter(article => activeFeedIds.has(article.feedId));
+    if (previousCache.length !== db.cachedArticles?.length) needsSave = true;
+    db.cachedArticles = previousCache;
 
-    const now = Date.now();
     const lastFetched = db.lastFetchedAt ? new Date(db.lastFetchedAt).getTime() : 0;
-    const isCacheExpired = !db.cachedArticles || db.cachedArticles.length === 0 || (now - lastFetched > CACHE_TTL_MS);
-
-    let allRawArticles: RSSArticle[] = [];
+    const isCacheExpired = previousCache.length === 0 || !lastFetched || Date.now() - lastFetched > CACHE_TTL_MS;
+    let allRawArticles = previousCache;
+    let warnings: string[] = [];
+    let isFromCache = !forceRefresh && !isCacheExpired;
 
     if (forceRefresh || isCacheExpired) {
-      // Fetch fresh articles from all enabled feeds
-      allRawArticles = await fetchAllActiveFeeds(targetFeeds);
-      db.cachedArticles = allRawArticles;
-      db.lastFetchedAt = new Date().toISOString();
-      await saveDb(db);
-    } else {
-      // Use cached articles
-      allRawArticles = db.cachedArticles || [];
+      const result = await fetchAllActiveFeeds(targetFeeds);
+      const fetchedFeedIds = new Set(targetFeeds.map(feed => feed.id));
+
+      // The network runs outside the lock; merge into the latest persisted state
+      // inside one transaction so concurrent note and bookmark saves are retained.
+      db = await updateDb(latest => {
+        normalizeStoredArticles(latest);
+        targetFeeds = latest.feeds.filter(feed => feed.enabled);
+        const currentActiveFeedIds = new Set(targetFeeds.map(feed => feed.id));
+        const latestCache = (latest.cachedArticles || []).filter(article => currentActiveFeedIds.has(article.feedId));
+        warnings = result.warnings.filter((_, index) => currentActiveFeedIds.has(result.failedFeedIds[index]));
+        const failedFeedIds = new Set(result.failedFeedIds);
+        const identityIds = new Map(
+          [...latestCache, ...latest.savedArticles].map(article => [articleIdentity(article), article.id])
+        );
+        const refreshedArticles = result.articles.filter(article => currentActiveFeedIds.has(article.feedId)).map(article => ({
+          ...article,
+          id: identityIds.get(articleIdentity(article)) || article.id,
+        }));
+        const retainedArticles = latestCache.filter(article => failedFeedIds.has(article.feedId) || !fetchedFeedIds.has(article.feedId));
+        latest.cachedArticles = Array.from(new Map(
+          [...refreshedArticles, ...retainedArticles].map(article => [article.id, article])
+        ).values()).sort((a, b) => (new Date(b.pubDate).getTime() || 0) - (new Date(a.pubDate).getTime() || 0));
+
+        // A complete failure must not make stale data appear freshly synchronized.
+        if (refreshedArticles.length > 0 || targetFeeds.length === 0) latest.lastFetchedAt = new Date().toISOString();
+        isFromCache = refreshedArticles.length === 0 && retainedArticles.length > 0;
+        normalizeStoredArticles(latest);
+        return latest;
+      });
+      needsSave = false;
     }
 
-    // Apply feed, category, and language filters
-    let articles = allRawArticles;
+    if (needsSave) {
+      db = await updateDb(latest => {
+        normalizeStoredArticles(latest);
+        const activeIds = new Set(latest.feeds.filter(feed => feed.enabled).map(feed => feed.id));
+        latest.cachedArticles = (latest.cachedArticles || []).filter(article => activeIds.has(article.feedId));
+        return latest;
+      });
+    }
+    targetFeeds = db.feeds.filter(feed => feed.enabled);
+    allRawArticles = db.cachedArticles || [];
 
-    if (feedId && feedId !== 'all') {
-      articles = articles.filter(a => a.feedId === feedId);
-    }
-    if (category && category !== 'all') {
-      articles = articles.filter(a => a.category === category);
-    }
-    if (language && language !== 'all') {
-      articles = articles.filter(a => a.feedLanguage === language);
-    }
-
-    const savedMap = new Set((db.savedArticles || []).map(a => a.id));
+    const savedMap = new Set(db.savedArticles.map(article => article.id));
     const readMap = new Set(db.readArticleIds || []);
+    const annotate = (article: RSSArticle): RSSArticle => ({
+      ...article,
+      saved: savedMap.has(article.id),
+      read: readMap.has(article.id),
+    });
 
-    // Annotate saved & read status
-    articles = articles.map(a => ({
-      ...a,
-      saved: savedMap.has(a.id),
-      read: readMap.has(a.id),
-    }));
-
-    // Filter by search query if provided
-    if (query) {
-      articles = articles.filter(a => 
-        a.title.toLowerCase().includes(query) ||
-        a.snippet.toLowerCase().includes(query) ||
-        a.author?.toLowerCase().includes(query)
-      );
-    }
+    const articles = allRawArticles.filter(article => {
+      if (feedId && feedId !== 'all' && article.feedId !== feedId) return false;
+      if (category && category !== 'all' && article.category !== category) return false;
+      if (language && language !== 'all' && article.feedLanguage !== language) return false;
+      if (query && ![article.title, article.snippet, article.author || ''].some(value => value.toLowerCase().includes(query))) return false;
+      return true;
+    }).map(annotate);
 
     return NextResponse.json({
       articles,
+      // This independent collection includes archived and disabled-source saves.
+      savedArticles: db.savedArticles.map(annotate),
       totalCount: articles.length,
       activeFeedsCount: targetFeeds.length,
       lastFetchedAt: db.lastFetchedAt,
-      isFromCache: !forceRefresh && !isCacheExpired,
+      isFromCache,
+      warnings,
     });
   } catch (error) {
     console.error('Error fetching RSS articles:', error);

@@ -1,5 +1,16 @@
 import Parser from 'rss-parser';
+import { createHash } from 'crypto';
 import { FeedSource, RSSArticle } from '@/types';
+
+export function createArticleId(feedId: string, uniqueId: string): string {
+  return `rss_${createHash('sha256').update(`${feedId}:${uniqueId}`).digest('hex').slice(0, 24)}`;
+}
+
+export interface FeedFetchResult {
+  articles: RSSArticle[];
+  failedFeedIds: string[];
+  warnings: string[];
+}
 
 // Custom fields to capture media and author tags
 const parser = new Parser({
@@ -75,10 +86,10 @@ export async function fetchFeedArticles(feed: FeedSource): Promise<RSSArticle[]>
       const snippet = cleanHtmlSnippet(item.contentSnippet || item.summary || rawContent);
       const imageUrl = extractImageUrl(item);
       const anyItem = item as any;
-      const uniqueId = anyItem.guid || anyItem.id || anyItem.link || `${feed.id}-${index}-${item.title}`;
+      const uniqueId = anyItem.link || anyItem.guid || anyItem.id || `${item.title}-${item.pubDate || item.isoDate || index}`;
 
       return {
-        id: Buffer.from(uniqueId).toString('base64').replace(/=/g, '').slice(0, 32),
+        id: createArticleId(feed.id, String(uniqueId)),
         feedId: feed.id,
         feedName: feed.name,
         feedLanguage: feed.language,
@@ -93,12 +104,13 @@ export async function fetchFeedArticles(feed: FeedSource): Promise<RSSArticle[]>
       };
     });
   } catch (error) {
-    console.warn(`[RSS Error] Failed to fetch feed ${feed.name} (${feed.url}):`, error instanceof Error ? error.message : error);
-    return [];
+    // The aggregator returns one concise warning per unavailable source.
+    // Avoid printing the same remote-source failures on every refresh.
+    throw error;
   }
 }
 
-export async function fetchAllActiveFeeds(feeds: FeedSource[]): Promise<RSSArticle[]> {
+export async function fetchAllActiveFeeds(feeds: FeedSource[]): Promise<FeedFetchResult> {
   const activeFeeds = feeds.filter(f => f.enabled);
   // Fetch concurrently with Promise.allSettled
   const results = await Promise.allSettled(
@@ -106,9 +118,15 @@ export async function fetchAllActiveFeeds(feeds: FeedSource[]): Promise<RSSArtic
   );
 
   const allArticles: RSSArticle[] = [];
-  results.forEach(res => {
-    if (res.status === 'fulfilled') {
+  const failedFeedIds: string[] = [];
+  const warnings: string[] = [];
+  results.forEach((res, index) => {
+    if (res.status === 'fulfilled' && res.value.length > 0) {
       allArticles.push(...res.value);
+    } else {
+      const feed = activeFeeds[index];
+      failedFeedIds.push(feed.id);
+      warnings.push(`${feed.name} : ${res.status === 'rejected' ? 'source temporairement inaccessible' : 'aucun article reçu'}. Les derniers articles disponibles sont conservés.`);
     }
   });
 
@@ -119,5 +137,9 @@ export async function fetchAllActiveFeeds(feeds: FeedSource[]): Promise<RSSArtic
     return timeB - timeA;
   });
 
-  return allArticles;
+  return {
+    articles: Array.from(new Map(allArticles.map(article => [article.id, article])).values()),
+    failedFeedIds,
+    warnings,
+  };
 }

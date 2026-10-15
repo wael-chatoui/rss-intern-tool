@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDb, saveDb } from '@/lib/db';
+import { getDb, updateDb } from '@/lib/db';
 import { SocialPost } from '@/types';
 
 export async function GET() {
@@ -11,26 +11,23 @@ export async function GET() {
   }
 }
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const db = await getDb();
-
-    if (!db.posts) {
-      db.posts = [];
-    }
-
     const newPost: SocialPost = {
-      id: `post-${Date.now()}`,
+      id: `post-${crypto.randomUUID()}`,
+      notes: typeof body.notes === 'string' ? body.notes : '',
       articleId: body.articleId,
       sourceArticleTitle: body.sourceArticleTitle || '',
       sourceArticleLink: body.sourceArticleLink || '',
       sourceArticleFeed: body.sourceArticleFeed || '',
       angle: body.angle || 'Nouvel angle éditorial',
-      tags: body.tags || ['Mode', 'FashionPress'],
+      tags: body.tags || [],
       status: body.status || 'idea',
-      scheduledDate: body.scheduledDate || new Date().toISOString().split('T')[0],
-      scheduledTime: body.scheduledTime || '18:00',
+      scheduledDate: body.scheduledDate || undefined,
+      scheduledTime: body.scheduledTime || undefined,
       platforms: body.platforms || ['tiktok', 'instagram', 'linkedin'],
       content: {
         tiktok: {
@@ -42,7 +39,7 @@ export async function POST(req: Request) {
         instagram: {
           caption: body.content?.instagram?.caption || '',
           carouselSlides: body.content?.instagram?.carouselSlides || [],
-          hashtags: body.content?.instagram?.hashtags || ['#Fashion', '#Mode', '#Trends'],
+          hashtags: body.content?.instagram?.hashtags || [],
         },
         linkedin: {
           title: body.content?.linkedin?.title || '',
@@ -54,8 +51,10 @@ export async function POST(req: Request) {
       updatedAt: new Date().toISOString(),
     };
 
-    db.posts.unshift(newPost);
-    await saveDb(db);
+    await updateDb(db => {
+      if (!db.posts) db.posts = [];
+      db.posts.unshift(newPost);
+    });
 
     return NextResponse.json({ post: newPost }, { status: 201 });
   } catch (error) {
@@ -71,18 +70,17 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: 'ID requis' }, { status: 400 });
     }
 
-    const db = await getDb();
-    const index = (db.posts || []).findIndex(p => p.id === updatedPost.id);
-
-    if (index === -1) {
+    const post = await updateDb(db => {
+      const index = (db.posts || []).findIndex(p => p.id === updatedPost.id);
+      if (index === -1) return null;
+      const savedPost = { ...updatedPost, updatedAt: new Date().toISOString() };
+      db.posts[index] = savedPost;
+      return savedPost;
+    });
+    if (!post) {
       return NextResponse.json({ error: 'Post non trouvé' }, { status: 404 });
     }
-
-    updatedPost.updatedAt = new Date().toISOString();
-    db.posts[index] = updatedPost;
-    await saveDb(db);
-
-    return NextResponse.json({ post: updatedPost });
+    return NextResponse.json({ post });
   } catch (error) {
     return NextResponse.json({ error: 'Erreur mise à jour post' }, { status: 500 });
   }
@@ -97,9 +95,9 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: 'ID requis' }, { status: 400 });
     }
 
-    const db = await getDb();
-    db.posts = (db.posts || []).filter(p => p.id !== id);
-    await saveDb(db);
+    await updateDb(db => {
+      db.posts = (db.posts || []).filter(p => p.id !== id);
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

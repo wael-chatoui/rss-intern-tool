@@ -1,87 +1,37 @@
-# 🌟 Fashion Press & Social Cockpit
+# La rédaction
 
-> **Cockpit personnel de veille de presse fashion internationale et studio de rédaction multicanal (TikTok, Instagram, LinkedIn).**
+Un espace de veille RSS, de notes sourcées et de rédaction pour construire une chaîne de presse indépendante. L’interface utilise un thème clair uniquement, avec une direction éditoriale papier et vert forêt.
 
-Cette application réunit les flux RSS des plus grands médias de mode (France & International), vous permet de sélectionner les sujets chauds, de définir votre angle éditorial, et de rédiger instantanément vos déclinaisons pour les réseaux sociaux avec un planning éditorial interactif (Kanban & Calendrier).
+## Utilisation
 
----
+- **Veille RSS** : lecture en magazine ou en liste, recherche locale instantanée, filtres par source, langue et thématique, suivi lu/non lu.
+- **Enregistrés** : sélection persistante, y compris les articles qui ne sont plus dans le cache RSS.
+- **Notes & rédaction** : notes libres ou créées depuis un article avec son lien source. Enregistrement automatique, statuts, mots-clés et export Markdown. Les contenus TikTok, Instagram et LinkedIn existants restent accessibles dans les onglets du carnet.
+- **Planning éditorial** : tableau de préparation et calendrier. Un sujet peut être créé à la date sélectionnée. Le planning organise le travail ; il n’exécute pas de publication sur les réseaux.
+- **Mes sources** : ajout d’un flux RSS après vérification, activation, pause, recherche et retrait avec confirmation.
 
-## 🏛️ Architecture & Organisation de l'Interface
+Le raccourci `⌘ K` ou `Ctrl K` ouvre la recherche dans la veille. Les sources de mode déjà présentes sont conservées et de nouvelles sources peuvent être ajoutées.
 
-L'interface est structurée selon un **Split-Layout (Gauche / Droite)** optimisé pour un workflow de création sans friction :
+## Démarrage
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│  HEADER : Statuts, KPI (# flux, # articles, # posts prêts), Synchronisation, Gestion   │
-├──────────────────────────────────────────┬─────────────────────────────────────────────┤
-│        SECTION GAUCHE                    │              SECTION DROITE                 │
-│      VEILLE RSS FASHION                  │          ATELIER & PLANNING SOCIAL          │
-│                                          │                                             │
-│ • Filtres : Catégories (Haute Couture,   │ 1. ✍️ Atelier Rédaction :                     │
-│   Business, Streetwear, Tendances, RSE)  │    • TikTok (Hook, Script minuté, B-roll)   │
-│ • Langues : Français 🇫🇷 / Anglais 🇬🇧    │    • Instagram (Légende, Carrousel, Tags)   │
-│ • Recherche temps réel                   │    • LinkedIn (Analyse marché, Takeaways)   │
-│ • Marque-pages (Favoris)                 │    • Compteurs de caractères & Copie 1-clic │
-│ • Cartes éditoriales & Lecteur d'article │ 2. 📋 Pipeline Kanban (Idée ➔ Publié)       │
-│ • Bouton "Créer un post" direct          │ 3. 📅 Calendrier Éditorial Mensuel          │
-│                                          │ 4. ✨ Studio IA (Prêt pour Phase 2)         │
-└──────────────────────────────────────────┴─────────────────────────────────────────────┘
-```
-
----
-
-## 📰 Sources RSS Fashion Intégrées par Défaut
-
-### 🇫🇷 Médias Français
-* **Vogue France** (`https://www.vogue.fr/feed/rss`) — Haute Couture & Défilés
-* **FashionNetwork France** (`https://fr.fashionnetwork.com/rss/news/`) — Business du luxe & Retail
-* **ELLE Mode** (`https://www.elle.fr/Mode/rss`) — Tendances & Célébrités
-* **Madame Figaro Mode** (`https://madame.lefigaro.fr/mode/feed`) — Haute Joaillerie & Couture
-
-### 🇬🇧 Médias Internationaux
-* **The Business of Fashion (BoF)** (`https://www.businessoffashion.com/arc/outboundfeeds/rss/`) — Analyses marché & Économie
-* **Hypebeast** (`https://hypebeast.com/feed`) — Streetwear & Sneaker Culture
-* **Highsnobiety** (`https://www.highsnobiety.com/feed/`) — Streetwear haut de gamme & Mode contemporaine
-* **Fashionista** (`https://fashionista.com/.rss/full/`) — Culture mode & Tendances
-* **Vogue US** (`https://www.vogue.com/feed/rss`) — Actualités mode mondiale
-* **Dazed Fashion** (`https://www.dazeddigital.com/rss/fashion`) — Avant-garde & Pop culture
-
-*Note : Vous pouvez ajouter n'importe quel flux RSS personnalisé ou désactiver des flux existants via le bouton **"Sources RSS"** dans le bandeau supérieur.*
-
----
-
-## 🚀 Démarrage Rapide
-
-### 1. Démarrer le serveur de développement
-```bash
+```sh
+npm install
 npm run dev
 ```
 
-L'application est disponible sur : **[http://localhost:3000](http://localhost:3000)**
+Ouvrir [l’application locale](http://localhost:3000).
 
-### 2. Builder pour la production
-```bash
+```sh
 npm run build
 npm run start
 ```
 
----
+Vérification TypeScript : `npx tsc --noEmit --incremental false`.
 
-## 🛠️ Stack Technique
+## Technique et données
 
-* **Framework :** [Next.js 14](https://nextjs.org/) (App Router, Route Handlers, Server Components)
-* **Langage :** TypeScript 5.6
-* **UI & Styles :** Composants shadcn/ui (Button, Input, Badge, Card, Separator), Tailwind CSS avec palette sombre épurée à faible contraste
-* **Séparateur Dynamique :** Volet redimensionnable à la souris en temps réel avec mémorisation locale
-* **Flux RSS :** `rss-parser` avec extraction automatique des vignettes/images, détection des balises d'auteurs et sanitisation HTML
-* **Persistance :** Base de données locale JSON auto-gérée (`data/db.json`), zéro dépendance C++/node-gyp complexe, backup immédiat
-* **Composants & Icônes :** Lucide React, Date-fns
+Next.js 14, React 18, TypeScript, Tailwind CSS, Lucide et rss-parser. L’application stocke les sources, notes, articles sélectionnés et cache dans `data/db.json`. Les écritures sont atomiques et les mutations sont sérialisées dans le processus serveur. Ce stockage est conçu pour un usage personnel local avec un seul processus serveur.
 
----
+Le cache RSS dure dix minutes. Une source indisponible conserve ses derniers articles et affiche un avertissement lors de l’actualisation. Les identifiants d’articles sont stables et distincts par source et lien ; les anciens identifiants sont migrés automatiquement. Les contenus RSS sont affichés comme texte sûr dans le lecteur.
 
-## 🤖 Préparation de la Feature IA (Phase 2)
-
-Comme convenu, **l'appel effectif aux modèles IA est en attente**. Cependant, le socle est entièrement architecturé pour l'accueillir :
-1. **Modèle de données prêt :** Découpage strict des formats vidéo TikTok, carrousels Instagram et analyses LinkedIn.
-2. **Onglet Assistant IA :** Contient des **templates de prompts calibrés pour l'actualité mode** que vous pouvez déjà copier-coller dans ChatGPT, Claude ou Gemini en 1 clic.
-3. **Branchage API futur :** Une route dédiée pourra simplement recevoir votre clé OpenAI/Gemini/Anthropic pour automatiser la génération des 3 formats à partir du texte de l'article RSS sélectionné.
+Les choix graphiques sont documentés dans `.ui-craft/brief.md` et `.ui-craft/tokens.md`. Les composants actifs de la refonte sont dans `src/components/Newsroom`.

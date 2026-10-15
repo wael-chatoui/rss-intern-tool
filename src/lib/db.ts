@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { DatabaseSchema, FeedSource, SocialPost, RSSArticle } from '@/types';
+import { randomUUID } from 'crypto';
+import { DatabaseSchema, FeedSource } from '@/types';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
@@ -165,34 +166,55 @@ Les départements presse et communication doivent désormais pivoter : valoriser
   ],
 };
 
-async function ensureDataFile(): Promise<void> {
+// Share the queue across route bundles and development hot reloads in this process.
+const databaseGlobal = globalThis as typeof globalThis & {
+  __rssPressDatabaseQueue?: Promise<void>;
+};
+
+function serializeDatabaseOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const result = (databaseGlobal.__rssPressDatabaseQueue || Promise.resolve()).then(operation);
+  databaseGlobal.__rssPressDatabaseQueue = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+async function writeDatabaseFile(data: DatabaseSchema): Promise<void> {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const temporaryFile = path.join(DATA_DIR, `.db-${process.pid}-${randomUUID()}.tmp`);
   try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    try {
-      await fs.access(DB_FILE);
-    } catch {
-      await fs.writeFile(DB_FILE, JSON.stringify(INITIAL_DB, null, 2), 'utf-8');
-    }
-  } catch (error) {
-    console.error('Error ensuring data file:', error);
+    await fs.writeFile(temporaryFile, JSON.stringify(data, null, 2), { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
+    await fs.rename(temporaryFile, DB_FILE);
+  } finally {
+    await fs.rm(temporaryFile, { force: true });
   }
 }
 
-export async function getDb(): Promise<DatabaseSchema> {
-  await ensureDataFile();
+async function readDatabaseFile(): Promise<DatabaseSchema> {
   try {
     const raw = await fs.readFile(DB_FILE, 'utf-8');
     const data = JSON.parse(raw) as DatabaseSchema;
-    if (!data.feeds || data.feeds.length === 0) {
-      data.feeds = DEFAULT_FEEDS;
-    }
+    // An empty source list is an intentional user choice.
+    if (!Array.isArray(data.feeds)) data.feeds = structuredClone(DEFAULT_FEEDS);
+    if (!Array.isArray(data.savedArticles)) data.savedArticles = [];
+    if (!Array.isArray(data.posts)) data.posts = [];
     return data;
-  } catch {
-    return INITIAL_DB;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    const data = structuredClone(INITIAL_DB);
+    await writeDatabaseFile(data);
+    return data;
   }
 }
 
-export async function saveDb(data: DatabaseSchema): Promise<void> {
-  await ensureDataFile();
-  await fs.writeFile(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
+export function getDb(): Promise<DatabaseSchema> {
+  return serializeDatabaseOperation(readDatabaseFile);
+}
+
+/** Apply a mutation to the latest database under the shared process lock. */
+export function updateDb<T>(mutate: (database: DatabaseSchema) => T | Promise<T>): Promise<T> {
+  return serializeDatabaseOperation(async () => {
+    const database = await readDatabaseFile();
+    const result = await mutate(database);
+    await writeDatabaseFile(database);
+    return result;
+  });
 }

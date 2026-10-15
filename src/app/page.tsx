@@ -1,537 +1,212 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Header } from '@/components/Header';
-import { FeedReaderSection } from '@/components/FeedReader/FeedReaderSection';
-import { PressStudioSection, StudioTab } from '@/components/PressStudio/PressStudioSection';
-import { AddFeedModal } from '@/components/FeedReader/AddFeedModal';
-import { ManageFeedsModal } from '@/components/FeedReader/ManageFeedsModal';
-import { SplitDivider } from '@/components/ui/SplitDivider';
-import {
-  FeedSource,
-  RSSArticle,
-  SocialPost,
-  FashionCategory,
-  Language,
-  PostStatus,
-  LayoutMode,
-} from '@/types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowRight, Bookmark, BookOpen, CalendarDays, Check, ChevronRight, CircleAlert, LayoutList, Menu, Newspaper, NotebookPen, Plus, RefreshCw, Rss, Search, SlidersHorizontal, X } from 'lucide-react';
+import { FeedSource, FashionCategory, Language, RSSArticle, SocialPost } from '@/types';
+import { ArticleReader } from '@/components/Newsroom/ArticleReader';
+import { SourceManager } from '@/components/Newsroom/SourceManager';
+import { NotesWorkspace } from '@/components/Newsroom/NotesWorkspace';
+import { useDialogAccessibility } from '@/components/Newsroom/dialog';
+
+type View = 'veille' | 'saved' | 'notes' | 'planning' | 'sources';
+type FeedTab = 'all' | 'unread' | 'saved';
+const categories: { id: FashionCategory; label: string }[] = [
+  { id: 'all', label: 'Toutes les thématiques' }, { id: 'haute-couture', label: 'Haute couture' }, { id: 'business', label: 'Économie & business' }, { id: 'streetwear', label: 'Streetwear' }, { id: 'trends', label: 'Culture & tendances' }, { id: 'sustainability', label: 'Environnement & RSE' },
+];
+const statusLabels = { idea: 'Idée', in_progress: 'En rédaction', ready: 'Prêt à publier', published: 'Publié' };
+const viewLabels: Record<View, string> = { veille: 'Veille RSS', saved: 'Articles enregistrés', notes: 'Notes & rédaction', planning: 'Planning éditorial', sources: 'Sources RSS' };
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, { cache: 'no-store', ...init });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Une erreur est survenue. Réessayez.');
+  return data as T;
+}
+function relativeDate(date: string) {
+  const value = new Date(date).getTime();
+  if (!Number.isFinite(value)) return '';
+  const diff = Date.now() - value;
+  if (diff < 60000) return 'À l’instant';
+  if (diff < 3600000) return `Il y a ${Math.floor(diff / 60000)} min`;
+  if (diff < 86400000) return `Il y a ${Math.floor(diff / 3600000)} h`;
+  return new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', timeZone: 'Europe/Paris' }).format(new Date(date));
+}
+function ArticleImage({ article, className }: { article: RSSArticle; className: string }) {
+  const [failed, setFailed] = useState(false);
+  return <div className={className}>{article.imageUrl && !failed ? <img src={article.imageUrl} alt="" loading="lazy" onError={() => setFailed(true)} /> : <div className="article-image-fallback"><Newspaper aria-hidden="true" /><span>{article.feedName}</span></div>}</div>;
+}
+function ArticleMeta({ article }: { article: RSSArticle }) {
+  return <div className="article-meta"><strong>{article.feedName}</strong><span className="meta-dot" /><span>{relativeDate(article.pubDate)}</span>{article.read && <><span className="meta-dot" /><span>Lu</span></>}</div>;
+}
 
 export default function Home() {
+  const [view, setView] = useState<View>('veille');
   const [feeds, setFeeds] = useState<FeedSource[]>([]);
   const [articles, setArticles] = useState<RSSArticle[]>([]);
+  const [savedArticles, setSavedArticles] = useState<RSSArticle[]>([]);
   const [posts, setPosts] = useState<SocialPost[]>([]);
-  const [currentPost, setCurrentPost] = useState<SocialPost | null>(null);
+  const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+  const [activeArticleId, setActiveArticleId] = useState<string | null>(null);
+  const [feedTab, setFeedTab] = useState<FeedTab>('all');
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState<FashionCategory>('all');
+  const [language, setLanguage] = useState<Language>('all');
+  const [feedId, setFeedId] = useState('all');
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [compact, setCompact] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(15);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [lastFetched, setLastFetched] = useState<string | null>(null);
+  const [toast, setToast] = useState('');
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const [openAdd, setOpenAdd] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const pendingArticles = useRef(new Set<string>());
+  const initialLoad = useRef(false);
+  const loadSequence = useRef(0);
+  const go = useCallback((next: View) => { setView(next); setMobileMenu(false); setOpenAdd(false); window.scrollTo({ top: 0 }); }, []);
+  const closeMobileMenu = useCallback(() => setMobileMenu(false), []);
+  useDialogAccessibility(mobileMenu, sidebarRef, closeMobileMenu);
+  const notify = useCallback((message: string) => setToast(message), []);
+  useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 4200); return () => clearTimeout(timer); }, [toast]);
 
-  // Filters state
-  const [selectedCategory, setSelectedCategory] = useState<FashionCategory>('all');
-  const [selectedLanguage, setSelectedLanguage] = useState<Language>('all');
-  const [selectedFeedId, setSelectedFeedId] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [showSavedOnly, setShowSavedOnly] = useState<boolean>(false);
-
-  // Dynamic Mouse Resizing state (percentage of width for left feed pane)
-  const [splitRatio, setSplitRatio] = useState<number>(48);
-  const [isDragging, setIsDragging] = useState<boolean>(false);
-  const containerRef = useRef<HTMLElement>(null);
-
-  // Layout mode (Split, Feed focused, Studio focused)
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>('split');
-
-  // Studio tab state
-  const [activeStudioTab, setActiveStudioTab] = useState<StudioTab>('editor');
-
-  // Loading & Modals state
-  const [isLoadingArticles, setIsLoadingArticles] = useState<boolean>(true);
-  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [isAddFeedOpen, setIsAddFeedOpen] = useState<boolean>(false);
-  const [isManageFeedsOpen, setIsManageFeedsOpen] = useState<boolean>(false);
-
-  // Load split ratio preference on mount
-  useEffect(() => {
+  const loadArticles = useCallback(async (refresh = false) => {
+    const sequence = ++loadSequence.current;
+    if (refresh) setRefreshing(true);
     try {
-      const savedRatio = localStorage.getItem('fashion_cockpit_split');
-      if (savedRatio) {
-        const parsed = parseFloat(savedRatio);
-        if (!isNaN(parsed) && parsed >= 22 && parsed <= 78) {
-          setSplitRatio(parsed);
-        }
-      }
-    } catch {
-      // ignore localStorage errors
-    }
+      const data = await request<{ articles: RSSArticle[]; savedArticles?: RSSArticle[]; lastFetchedAt?: string; warnings?: string[] }>(`/api/rss${refresh ? '?refresh=true' : ''}`);
+      if (sequence !== loadSequence.current) return;
+      setArticles(data.articles); setSavedArticles(data.savedArticles || []); setLastFetched(data.lastFetchedAt || null); setWarnings(data.warnings || []); setError('');
+      if (refresh) notify(data.warnings?.length ? 'Veille actualisée. Certaines sources sont indisponibles.' : 'Flux actualisés.');
+    } catch (e) { if (sequence === loadSequence.current) setError(e instanceof Error ? e.message : 'Impossible de charger la veille.'); }
+    finally { if (sequence === loadSequence.current) { setLoading(false); setRefreshing(false); } }
+  }, [notify]);
+  const loadFeeds = useCallback(async () => { const data = await request<{ feeds: FeedSource[] }>('/api/feeds'); setFeeds(data.feeds); }, []);
+  const handleFeedsChange = useCallback(async () => { await loadFeeds(); await loadArticles(true); }, [loadFeeds, loadArticles]);
+  useEffect(() => {
+    if (initialLoad.current) return;
+    initialLoad.current = true;
+    loadFeeds().catch(() => setError('Impossible de charger les sources. Réessayez.'));
+    request<{ posts: SocialPost[] }>('/api/posts').then(data => setPosts(data.posts)).catch(() => setError('Impossible de charger les notes. Réessayez.'));
+    void loadArticles();
+  }, [loadArticles, loadFeeds]);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); go('veille'); requestAnimationFrame(() => searchRef.current?.focus()); } if (event.key === 'Escape') setMobileMenu(false); };
+    window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
+  }, [go]);
+  useEffect(() => { setVisibleCount(15); }, [query, category, language, feedId, feedTab, view]);
+
+  const articlePool = useMemo(() => {
+    const pool = new Map(articles.map(article => [article.id, article]));
+    savedArticles.forEach(article => { if (!pool.has(article.id)) pool.set(article.id, article); });
+    return Array.from(pool.values());
+  }, [articles, savedArticles]);
+  const activeArticle = articlePool.find(article => article.id === activeArticleId) || null;
+  const unread = articles.filter(article => !article.read).length;
+  const activeFeeds = feeds.filter(feed => feed.enabled);
+  const savedView = view === 'saved' || feedTab === 'saved';
+  const filteredArticles = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase('fr');
+    return (savedView ? articlePool.filter(article => article.saved) : articles).filter(article =>
+      (feedTab !== 'unread' || savedView || !article.read) &&
+      (category === 'all' || article.category === category) &&
+      (language === 'all' || article.feedLanguage === language) &&
+      (feedId === 'all' || article.feedId === feedId) &&
+      (!needle || `${article.title} ${article.snippet} ${article.feedName} ${article.author || ''}`.toLocaleLowerCase('fr').includes(needle))
+    );
+  }, [articles, articlePool, savedView, feedTab, category, language, feedId, query]);
+  const resetFilters = () => { setQuery(''); setCategory('all'); setLanguage('all'); setFeedId('all'); setFeedTab('all'); };
+  const selectFeed = (id: string) => { go('veille'); setFeedId(id); setCategory('all'); setLanguage('all'); setQuery(''); setFeedTab('all'); };
+
+  const toggleSave = async (article: RSSArticle) => {
+    if (pendingArticles.current.has(article.id)) return;
+    pendingArticles.current.add(article.id);
+    try {
+      const data = await request<{ isSaved: boolean; savedArticles: RSSArticle[] }>('/api/articles/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(article) });
+      setArticles(prev => prev.map(item => item.id === article.id ? { ...item, saved: data.isSaved } : item));
+      setSavedArticles(data.savedArticles); notify(data.isSaved ? 'Article enregistré.' : 'Article retiré des enregistrements.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Impossible d’enregistrer cet article.'); throw e; }
+    finally { pendingArticles.current.delete(article.id); }
+  };
+  const toggleRead = async (article: RSSArticle) => {
+    const data = await request<{ read: boolean }>('/api/articles/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ articleId: article.id, read: !article.read }) });
+    setArticles(prev => prev.map(item => item.id === article.id ? { ...item, read: data.read } : item));
+    setSavedArticles(prev => prev.map(item => item.id === article.id ? { ...item, read: data.read } : item));
+  };
+  const createNote = async (article?: RSSArticle, scheduledDate?: string) => {
+    if (creating) return;
+    setCreating(true);
+    try {
+      const data = await request<{ post: SocialPost }>('/api/posts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        angle: article?.title || 'Note sans titre', notes: article?.snippet && !article.snippet.startsWith('Aucun aperçu') ? article.snippet : '',
+        articleId: article?.id, sourceArticleTitle: article?.title, sourceArticleLink: article?.link, sourceArticleFeed: article?.feedName,
+        status: 'idea', tags: [], platforms: [], scheduledDate, scheduledTime: scheduledDate ? '09:00' : undefined,
+      }) });
+      setPosts(prev => [data.post, ...prev]); setSelectedPostId(data.post.id); setActiveArticleId(null); go('notes'); notify('Note créée.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Impossible de créer une note.'); throw e; }
+    finally { setCreating(false); }
+  };
+  const savePost = useCallback(async (post: SocialPost) => {
+    const data = await request<{ post: SocialPost }>('/api/posts', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(post) });
+    setPosts(prev => prev.map(item => item.id === data.post.id ? data.post : item));
   }, []);
+  const deletePost = useCallback(async (id: string) => {
+    await request(`/api/posts?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    setPosts(prev => prev.filter(item => item.id !== id)); setSelectedPostId(prev => prev === id ? null : prev); notify('Note supprimée.');
+  }, [notify]);
+  const openNote = (post: SocialPost) => { setSelectedPostId(post.id); go('notes'); };
+  const addSource = () => { go('sources'); setOpenAdd(true); };
+  const featured = !compact ? filteredArticles[0] : undefined;
+  const rows = filteredArticles.slice(featured ? 1 : 0, visibleCount);
+  const categoryName = (value: FashionCategory) => categories.find(cat => cat.id === value)?.label || value;
+  const saveButton = (article: RSSArticle) => <button className={`icon-btn save-article ${article.saved ? 'saved' : ''}`} aria-label={article.saved ? `Retirer de la sélection : ${article.title}` : `Enregistrer : ${article.title}`} aria-pressed={!!article.saved} onClick={() => void toggleSave(article).catch(() => {})}><Bookmark aria-hidden="true" /></button>;
 
-  // Handle dynamic mouse dragging
-  useEffect(() => {
-    if (!isDragging) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const currentX = e.clientX - rect.left;
-      const newRatio = (currentX / rect.width) * 100;
-      // Clamp ratio between 22% and 78% for good readability on both sides
-      const clampedRatio = Math.min(Math.max(newRatio, 22), 78);
-      setSplitRatio(clampedRatio);
-    };
-
-    const handleMouseUp = () => {
-      setIsDragging(false);
-      try {
-        localStorage.setItem('fashion_cockpit_split', splitRatio.toString());
-      } catch {
-        // ignore
-      }
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-  }, [isDragging, splitRatio]);
-
-  const handleResetSplit = () => {
-    setSplitRatio(50);
-    setLayoutMode('split');
-    try {
-      localStorage.setItem('fashion_cockpit_split', '50');
-    } catch {
-      // ignore
-    }
-  };
-
-  const handleLayoutModeChange = (mode: LayoutMode) => {
-    setLayoutMode(mode);
-    if (mode === 'feed-focused') {
-      setSplitRatio(70);
-    } else if (mode === 'studio-focused') {
-      setSplitRatio(30);
-    } else {
-      setSplitRatio(50);
-    }
-  };
-
-  // Fetch initial feeds & posts
-  const fetchInitialData = useCallback(async () => {
-    try {
-      const [feedsRes, postsRes] = await Promise.all([
-        fetch('/api/feeds'),
-        fetch('/api/posts'),
-      ]);
-
-      const feedsData = await feedsRes.json();
-      const postsData = await postsRes.json();
-
-      if (feedsData.feeds) setFeeds(feedsData.feeds);
-      if (postsData.posts) {
-        setPosts(postsData.posts);
-        if (postsData.posts.length > 0 && !currentPost) {
-          setCurrentPost(postsData.posts[0]);
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching initial data:', error);
-    }
-  }, [currentPost]);
-
-  // Fetch articles based on active filters (with caching & force refresh)
-  const fetchArticles = useCallback(
-    async (forceRefresh = false) => {
-      setIsLoadingArticles(true);
-      try {
-        const params = new URLSearchParams();
-        if (selectedCategory !== 'all') params.set('category', selectedCategory);
-        if (selectedLanguage !== 'all') params.set('language', selectedLanguage);
-        if (selectedFeedId !== 'all') params.set('feedId', selectedFeedId);
-        if (searchQuery.trim()) params.set('q', searchQuery.trim());
-        if (forceRefresh) params.set('refresh', 'true');
-
-        const res = await fetch(`/api/rss?${params.toString()}`);
-        const data = await res.json();
-        if (data.articles) {
-          setArticles(data.articles);
-        }
-      } catch (error) {
-        console.error('Error fetching articles:', error);
-      } finally {
-        setIsLoadingArticles(false);
-      }
-    },
-    [selectedCategory, selectedLanguage, selectedFeedId, searchQuery]
-  );
-
-  useEffect(() => {
-    fetchInitialData();
-  }, [fetchInitialData]);
-
-  useEffect(() => {
-    fetchArticles(false);
-  }, [fetchArticles]);
-
-  // Manual refresh all feeds
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    await fetchArticles(true);
-    setIsRefreshing(false);
-  };
-
-  // Toggle bookmark on article
-  const handleToggleSaveArticle = async (article: RSSArticle) => {
-    try {
-      const res = await fetch('/api/articles/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(article),
-      });
-      const data = await res.json();
-
-      if (data.success) {
-        setArticles((prev) =>
-          prev.map((a) => (a.id === article.id ? { ...a, saved: data.isSaved } : a))
-        );
-      }
-    } catch (error) {
-      console.error('Error saving article:', error);
-    }
-  };
-
-  // Toggle read status on article
-  const handleToggleReadArticle = async (article: RSSArticle) => {
-    try {
-      const newReadStatus = !article.read;
-      const res = await fetch('/api/articles/read', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ articleId: article.id, read: newReadStatus }),
-      });
-      const data = await res.json();
-
-      if (data.success) {
-        setArticles((prev) =>
-          prev.map((a) => (a.id === article.id ? { ...a, read: newReadStatus } : a))
-        );
-      }
-    } catch (error) {
-      console.error('Error toggling read status:', error);
-    }
-  };
-
-  // Convert RSS article to a social media draft post
-  const handleCreatePostFromArticle = async (article: RSSArticle) => {
-    const defaultAngle = `Décryptage : ${article.title}`;
-    const newPostDraft = {
-      articleId: article.id,
-      sourceArticleTitle: article.title,
-      sourceArticleLink: article.link,
-      sourceArticleFeed: article.feedName,
-      angle: defaultAngle,
-      tags: [article.feedName.replace(/\s+/g, ''), 'FashionTrends', 'Mode2026'],
-      status: 'idea' as PostStatus,
-      scheduledDate: new Date().toISOString().split('T')[0],
-      scheduledTime: '18:00',
-      platforms: ['tiktok', 'instagram', 'linkedin'],
-      content: {
-        tiktok: {
-          hook: `Vous avez sûrement raté ce détail caché sur le défilé ${article.feedName}... 👀👗`,
-          script: `[0:00 - 0:03] Hook : "Ce détail est passé inaperçu, mais il annonce le thème de toute la saison..."
-[0:03 - 0:15] Contexte : ${article.snippet.slice(0, 120)}...
-[0:15 - 0:35] Décryptage : Pourquoi ce choix est stratégique et ce que ça annonce pour la saison.
-[0:35 - 0:45] CTA : Votre avis en commentaire : Top ou Flop ?`,
-          visualNotes: 'Incrustation des visuels de la pièce/défilé, cuts rapides.',
-          durationEstimate: '30s-45s',
-        },
-        instagram: {
-          caption: `${article.title} ✨
-
-${article.snippet}
-
-💡 Les 3 points à retenir :
-1. Une évolution majeure repérée sur les podiums
-2. L'impact direct sur les tendances du prêt-à-porter
-3. Ce que cela révèle sur l'orientation de la maison
-
-Partagez votre regard en commentaire 💬
-
-#FashionNews #${article.feedName.replace(/\s+/g, '')} #HauteCouture #Mode2026 #Trends`,
-          carouselSlides: [
-            `Slide 1 : Titre "Décryptage : ${article.title.slice(0, 30)}..."`,
-            `Slide 2 : L'annonce et le contexte clé`,
-            `Slide 3 : Les détails de confection ou l'impact business`,
-            `Slide 4 : Synthèse et question ouverte`,
-          ],
-          hashtags: ['#FashionNews', '#Mode2026', '#FashionTrends', '#HauteCouture'],
-        },
-        linkedin: {
-          title: `Analyse industrie : Les répercussions de l'annonce "${article.title.slice(0, 50)}"`,
-          body: `L'actualité récente relayée par ${article.feedName} soulève des questions fondamentales pour l'écosystème mode et luxe.
-
-${article.snippet}
-
-Dans un marché où l'attention des consommateurs est ultra-fragmentée, cette orientation témoigne d'un recentrage stratégique :
-- Consolidation de l'image de marque
-- Réponse aux nouvelles attentes de durabilité et de désirabilité
-- Adaptation des canaux de communication digitale
-
-Quelle est votre lecture de ce mouvement stratégique ?`,
-          keyTakeaways: [
-            'Recentrage stratégique de la maison',
-            'Impact direct sur la communication et le retail',
-            'Évolution des attentes des acheteurs de luxe',
-          ],
-        },
-      },
-    };
-
-    try {
-      const res = await fetch('/api/posts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newPostDraft),
-      });
-
-      const data = await res.json();
-      if (data.post) {
-        setPosts((prev) => [data.post, ...prev]);
-        setCurrentPost(data.post);
-        setActiveStudioTab('editor');
-      }
-    } catch (error) {
-      console.error('Error creating post from article:', error);
-    }
-  };
-
-  // Create empty post
-  const handleNewPost = async () => {
-    const emptyDraft = {
-      angle: 'Nouveau sujet éditorial fashion',
-      tags: ['Mode', 'FashionPress'],
-      status: 'idea' as PostStatus,
-      scheduledDate: new Date().toISOString().split('T')[0],
-      scheduledTime: '18:00',
-      platforms: ['tiktok', 'instagram', 'linkedin'],
-      content: {
-        tiktok: {
-          hook: '',
-          script: `[0:00 - 0:03] Hook : ...
-[0:03 - 0:15] Contexte : ...
-[0:15 - 0:35] Analyse : ...
-[0:35 - 0:45] CTA : ...`,
-          visualNotes: '',
-          durationEstimate: '30s-45s',
-        },
-        instagram: {
-          caption: '',
-          carouselSlides: ['Slide 1 : Hook', 'Slide 2 : Détail', 'Slide 3 : Conclusion'],
-          hashtags: ['#Fashion', '#Mode', '#Trends'],
-        },
-        linkedin: {
-          title: '',
-          body: '',
-          keyTakeaways: ['Point clé 1', 'Point clé 2'],
-        },
-      },
-    };
-
-    try {
-      const res = await fetch('/api/posts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(emptyDraft),
-      });
-      const data = await res.json();
-      if (data.post) {
-        setPosts((prev) => [data.post, ...prev]);
-        setCurrentPost(data.post);
-        setActiveStudioTab('editor');
-      }
-    } catch (error) {
-      console.error('Error creating new post:', error);
-    }
-  };
-
-  const handleNewPostWithDate = async (dateStr: string) => {
-    await handleNewPost();
-    if (currentPost) {
-      setCurrentPost({
-        ...currentPost,
-        scheduledDate: dateStr,
-      });
-    }
-  };
-
-  // Save/Update post
-  const handleSavePost = async (updatedPost: SocialPost) => {
-    try {
-      const res = await fetch('/api/posts', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedPost),
-      });
-      const data = await res.json();
-      if (data.post) {
-        setPosts((prev) => prev.map((p) => (p.id === data.post.id ? data.post : p)));
-        setCurrentPost(data.post);
-      }
-    } catch (error) {
-      console.error('Error updating post:', error);
-    }
-  };
-
-  // Update status (e.g. from Kanban)
-  const handleUpdateStatus = async (post: SocialPost, newStatus: PostStatus) => {
-    const updated = { ...post, status: newStatus };
-    await handleSavePost(updated);
-  };
-
-  // Delete post
-  const handleDeletePost = async (id: string) => {
-    try {
-      await fetch(`/api/posts?id=${id}`, { method: 'DELETE' });
-      setPosts((prev) => prev.filter((p) => p.id !== id));
-      if (currentPost?.id === id) {
-        const remaining = posts.filter((p) => p.id !== id);
-        setCurrentPost(remaining.length > 0 ? remaining[0] : null);
-      }
-    } catch (error) {
-      console.error('Error deleting post:', error);
-    }
-  };
-
-  // Toggle feed enabled/disabled
-  const handleToggleFeed = async (id: string, currentEnabled: boolean) => {
-    try {
-      const res = await fetch('/api/feeds', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, enabled: !currentEnabled }),
-      });
-      const data = await res.json();
-      if (data.feed) {
-        setFeeds((prev) => prev.map((f) => (f.id === id ? data.feed : f)));
-        fetchArticles(true);
-      }
-    } catch (error) {
-      console.error('Error toggling feed:', error);
-    }
-  };
-
-  // Delete feed
-  const handleDeleteFeed = async (id: string) => {
-    try {
-      await fetch(`/api/feeds?id=${id}`, { method: 'DELETE' });
-      setFeeds((prev) => prev.filter((f) => f.id !== id));
-      fetchArticles(true);
-    } catch (error) {
-      console.error('Error deleting feed:', error);
-    }
-  };
-
-  return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-background">
-      {/* Top Main Header with Consolidated Menu */}
-      <Header
-        onRefresh={handleRefresh}
-        isRefreshing={isRefreshing}
-        onOpenManageFeeds={() => setIsManageFeedsOpen(true)}
-        onOpenAddFeed={() => setIsAddFeedOpen(true)}
-        layoutMode={layoutMode}
-        onLayoutChange={handleLayoutModeChange}
-        onResetSplit={handleResetSplit}
-        onNewPost={handleNewPost}
-        stats={{
-          activeFeeds: feeds.filter((f) => f.enabled).length,
-          totalArticles: articles.length,
-          savedArticles: articles.filter((a) => a.saved).length,
-          readyPosts: posts.filter((p) => p.status === 'ready' || p.status === 'published').length,
-        }}
-      />
-
-      {/* Main Dynamically Resizable Cockpit Layout */}
-      <main ref={containerRef} className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
-        {/* LEFT PANE: Fashion RSS Veille & Actualités */}
-        <div
-          style={{ width: `${splitRatio}%` }}
-          className={`h-1/2 md:h-full overflow-hidden shrink-0 ${
-            isDragging ? '' : 'transition-[width] duration-150 ease-out'
-          }`}
-        >
-          <FeedReaderSection
-            articles={articles}
-            feeds={feeds}
-            isLoading={isLoadingArticles}
-            selectedCategory={selectedCategory}
-            onSelectCategory={setSelectedCategory}
-            selectedLanguage={selectedLanguage}
-            onSelectLanguage={setSelectedLanguage}
-            selectedFeedId={selectedFeedId}
-            onSelectFeedId={setSelectedFeedId}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            showSavedOnly={showSavedOnly}
-            onToggleShowSavedOnly={() => setShowSavedOnly(!showSavedOnly)}
-            onToggleSaveArticle={handleToggleSaveArticle}
-            onToggleReadArticle={handleToggleReadArticle}
-            onCreatePostFromArticle={handleCreatePostFromArticle}
-          />
-        </div>
-
-        {/* Dynamic Draggable Split Handle (Mouse Resizer) */}
-        <SplitDivider
-          onMouseDown={() => setIsDragging(true)}
-          onDoubleClick={handleResetSplit}
-          isDragging={isDragging}
-          splitPercentage={splitRatio}
-        />
-
-        {/* RIGHT PANE: Editorial & Social Press Studio */}
-        <div
-          style={{ width: `${100 - splitRatio}%` }}
-          className={`h-1/2 md:h-full overflow-hidden flex-1 ${
-            isDragging ? '' : 'transition-[width] duration-150 ease-out'
-          }`}
-        >
-          <PressStudioSection
-            posts={posts}
-            currentPost={currentPost}
-            activeTab={activeStudioTab}
-            onTabChange={setActiveStudioTab}
-            onSavePost={handleSavePost}
-            onDeletePost={handleDeletePost}
-            onNewPost={handleNewPost}
-            onSelectPost={setCurrentPost}
-            onUpdateStatus={handleUpdateStatus}
-            onNewPostWithDate={handleNewPostWithDate}
-          />
-        </div>
+  return <div className="newsroom">
+    <a className="skip-link" href="#main">Aller au contenu</a>
+    {mobileMenu && <button className="sidebar-scrim" aria-label="Fermer la navigation" onClick={() => setMobileMenu(false)} />}
+    <aside ref={sidebarRef} className={`sidebar ${mobileMenu ? 'is-open' : ''}`} aria-label="Navigation principale" role={mobileMenu ? 'dialog' : undefined} aria-modal={mobileMenu ? true : undefined} tabIndex={mobileMenu ? -1 : undefined}>
+      <a className="brand" href="#main" onClick={() => go('veille')}><span className="brand-mark">r.</span><span className="brand-name">La rédaction</span></a>
+      <span className="nav-label">NAVIGATION</span>
+      <nav>{([
+        { id: 'veille', label: 'Veille RSS', icon: Newspaper, count: unread },
+        { id: 'saved', label: 'Enregistrés', icon: Bookmark, count: savedArticles.length },
+        { id: 'notes', label: 'Notes & rédaction', icon: NotebookPen, count: posts.length },
+        { id: 'planning', label: 'Planning éditorial', icon: CalendarDays },
+      ] as const).map(item => <button key={item.id} className={`nav-item ${view === item.id ? 'active' : ''}`} aria-current={view === item.id ? 'page' : undefined} onClick={() => { go(item.id); if (item.id === 'veille' || item.id === 'saved') { setFeedTab('all'); resetFilters(); } }}><item.icon aria-hidden="true" /><span>{item.label}</span>{'count' in item && <span className="nav-count">{item.count}</span>}</button>)}</nav>
+      <div className="sidebar-divider" />
+      <button className={`nav-item ${view === 'sources' ? 'active' : ''}`} aria-current={view === 'sources' ? 'page' : undefined} onClick={() => go('sources')}><Rss aria-hidden="true" /><span>Sources RSS</span><span className="nav-count">{activeFeeds.length}</span></button>
+      <div className="sidebar-sources">{activeFeeds.slice(0, 5).map(feed => <button className={`sidebar-source ${feedId === feed.id && view === 'veille' ? 'active' : ''}`} key={feed.id} onClick={() => selectFeed(feed.id)}><span className="source-letter" aria-hidden="true">{feed.name.charAt(0)}</span><span className="source-name">{feed.name.replace(' (France)', '')}</span></button>)}</div>
+      <button className="btn btn-ghost sidebar-add" onClick={addSource}><Plus aria-hidden="true" />Ajouter une source</button>
+      <div className="sidebar-footer"><div className="local-profile"><span className="profile-avatar">r.</span><div><strong>Stockage local</strong><small>Sur cet ordinateur</small></div></div></div>
+    </aside>
+    <div className="app-body">
+      <header className="topbar"><div className="breadcrumb"><button className="icon-btn mobile-menu" aria-label={mobileMenu ? 'Fermer le menu' : 'Ouvrir le menu'} aria-expanded={mobileMenu} onClick={() => setMobileMenu(!mobileMenu)}>{mobileMenu ? <X /> : <Menu />}</button><span>Rédaction</span><ChevronRight aria-hidden="true" /><strong>{viewLabels[view]}</strong></div><div className="topbar-right"><span className="sync-status"><span className="status-dot" />{loading ? 'Chargement des sources' : lastFetched ? `Synchronisé ${relativeDate(lastFetched).toLowerCase()}` : `${activeFeeds.length} sources actives`}</span><button className="btn btn-ghost" disabled={refreshing} onClick={() => void loadArticles(true)}><RefreshCw className={refreshing ? 'is-spinning' : ''} aria-hidden="true" />{refreshing ? 'Actualisation…' : 'Actualiser'}</button></div></header>
+      <main id="main" className="page-content" tabIndex={-1}>
+        <div className="page-heading"><div><h1>{viewLabels[view]}</h1></div>{view !== 'sources' && <button className="btn btn-primary" aria-label="Nouvelle note" disabled={creating} onClick={() => void createNote().catch(() => {})}><Plus aria-hidden="true" /><span>{creating ? 'Création…' : 'Nouvelle note'}</span></button>}</div>
+        {error && <div className="error-banner" role="alert"><CircleAlert aria-hidden="true" /><span>{error}</span><button onClick={() => { setError(''); void loadFeeds().catch(() => {}); void loadArticles(); }}>Réessayer</button><button className="icon-btn" aria-label="Fermer le message" onClick={() => setError('')}><X /></button></div>}
+        {(view === 'veille' || view === 'saved') && <div className="feed-layout"><section className="feed-main" aria-label="Articles RSS">
+          <div className="feed-tabs" aria-label="Filtrer les articles">{([{ id: 'all', label: 'Tous les articles', count: view === 'saved' ? savedArticles.length : articles.length }, { id: 'unread', label: 'À lire', count: unread }, { id: 'saved', label: 'Enregistrés', count: savedArticles.length }] as const).filter(item => view !== 'saved' || item.id === 'all').map(item => <button key={item.id} className={`feed-tab ${feedTab === item.id ? 'active' : ''}`} aria-pressed={feedTab === item.id} onClick={() => setFeedTab(item.id)}>{view === 'saved' ? 'Ma sélection' : item.label}<span className="feed-tab-count">{item.count}</span></button>)}</div>
+          <div className="feed-toolbar"><div className="search-control"><Search aria-hidden="true" /><input ref={searchRef} aria-label="Rechercher dans les articles" placeholder="Rechercher un sujet, une source…" value={query} onChange={e => setQuery(e.target.value)} />{query ? <button className="icon-btn" aria-label="Effacer la recherche" onClick={() => setQuery('')}><X /></button> : <kbd>⌘ K</kbd>}</div><button className={`btn btn-secondary filter-toggle ${category !== 'all' || language !== 'all' || feedId !== 'all' || filterOpen ? 'is-active' : ''}`} aria-label="Filtres" aria-expanded={filterOpen} aria-controls="feed-filters" onClick={() => setFilterOpen(!filterOpen)}><SlidersHorizontal aria-hidden="true" /><span>Filtres</span></button><div className="view-toggle" aria-label="Affichage des articles"><button className={`icon-btn ${!compact ? 'active' : ''}`} aria-label="Affichage magazine" aria-pressed={!compact} onClick={() => setCompact(false)}><Newspaper /></button><button className={`icon-btn ${compact ? 'active' : ''}`} aria-label="Affichage liste" aria-pressed={compact} onClick={() => setCompact(true)}><LayoutList /></button></div></div>
+          {filterOpen && <div className="filter-panel" id="feed-filters"><label>Thématique<select className="field" value={category} onChange={e => setCategory(e.target.value as FashionCategory)}>{categories.map(cat => <option key={cat.id} value={cat.id}>{cat.label}</option>)}</select></label><label>Langue<select className="field" value={language} onChange={e => setLanguage(e.target.value as Language)}><option value="all">Toutes les langues</option><option value="fr">Français</option><option value="en">Anglais</option></select></label><label>Source<select className="field" value={feedId} onChange={e => setFeedId(e.target.value)}><option value="all">Toutes les sources</option>{feeds.map(feed => <option key={feed.id} value={feed.id}>{feed.name}</option>)}</select></label><button className="filter-reset" onClick={resetFilters}>Réinitialiser les filtres</button></div>}
+          {warnings.length > 0 && <div className="warning-banner"><CircleAlert aria-hidden="true" /><details><summary>{warnings.length} source{warnings.length > 1 ? 's' : ''} indisponible{warnings.length > 1 ? 's' : ''}. Les articles conservés restent accessibles.</summary>{warnings.map(warning => <p key={warning}>{warning}</p>)}</details></div>}
+          {loading ? <div aria-busy="true" aria-label="Chargement des articles"><div className="feed-skeleton feature" /><div className="feed-skeleton" /><div className="feed-skeleton" /><span className="sr-only">Chargement des articles…</span></div> : filteredArticles.length ? <>
+            <div className="feed-section-caption"><strong>{feedId !== 'all' ? feeds.find(feed => feed.id === feedId)?.name || 'Sélection' : savedView ? 'Articles enregistrés' : query ? 'Résultats' : 'Articles récents'}</strong><span>{filteredArticles.length} article{filteredArticles.length > 1 ? 's' : ''} · Plus récents d’abord</span></div>
+            {featured && <article className="featured-article"><button className="article-title-button" aria-label={`Lire : ${featured.title}`} onClick={() => setActiveArticleId(featured.id)}><ArticleImage key={featured.id} article={featured} className="featured-image" /></button><div className="featured-copy"><ArticleMeta article={featured} /><h2><button className="article-title-button line-clamp-3" onClick={() => setActiveArticleId(featured.id)}>{featured.title}</button></h2><p className="line-clamp-3">{featured.snippet.startsWith('Aucun aperçu') ? 'Aucun extrait disponible.' : featured.snippet}</p><span className="category-tag">{categoryName(featured.category)}</span><div className="featured-bottom"><button className="read-link" onClick={() => setActiveArticleId(featured.id)}>Lire l’article<ArrowRight aria-hidden="true" /></button>{saveButton(featured)}</div></div></article>}
+            <div className="feed-section-caption"><strong>{featured ? 'Autres articles' : 'Articles'}</strong><span>{savedView ? 'Enregistrés' : `${activeFeeds.length} sources actives`}</span></div>
+            <div className={`article-list ${compact ? 'compact' : ''}`}>{rows.map(article => <article key={article.id} className={`article-row ${article.read ? 'is-read' : ''}`}><button className="article-title-button row-image" aria-label={`Lire : ${article.title}`} onClick={() => setActiveArticleId(article.id)}><ArticleImage key={article.id} article={article} className="row-image" /></button><div className="row-copy"><ArticleMeta article={article} /><h3><button className="article-title-button line-clamp-2" onClick={() => setActiveArticleId(article.id)}>{article.title}</button></h3>{!article.snippet.startsWith('Aucun aperçu') && <p className="line-clamp-2">{article.snippet}</p>}<span className="category-tag">{categoryName(article.category)}</span></div>{saveButton(article)}</article>)}</div>
+            {filteredArticles.length > visibleCount && <div className="feed-load-more"><button className="btn btn-secondary" onClick={() => setVisibleCount(prev => prev + 15)}>Voir plus d’articles<ArrowDown aria-hidden="true" /></button></div>}
+          </> : <div className="empty-state"><BookOpen aria-hidden="true" /><h2>{savedView ? 'Aucun article enregistré' : 'Aucun article'}</h2><p>{savedView ? 'Les articles enregistrés apparaissent ici.' : query || category !== 'all' || language !== 'all' || feedId !== 'all' ? 'Modifiez la recherche ou les filtres.' : 'Ajoutez une source RSS pour charger des articles.'}</p><button className="btn btn-secondary" onClick={savedView ? () => { go('veille'); resetFilters(); } : query || category !== 'all' || language !== 'all' || feedId !== 'all' ? resetFilters : addSource}>{savedView ? 'Voir les articles' : query || category !== 'all' || language !== 'all' || feedId !== 'all' ? 'Effacer les filtres' : 'Ajouter une source'}</button></div>}
+        </section><aside className="carnet-aside" aria-label="Notes récentes"><section className="carnet-panel"><div className="carnet-header"><h2><NotebookPen aria-hidden="true" />Notes récentes</h2><span>{posts.length}</span></div>{posts.length ? [...posts].sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0,3).map(post => <button className="carnet-note" key={post.id} onClick={() => openNote(post)}><span className="carnet-note-status"><span className="status-dot" />{statusLabels[post.status]}</span><strong className="line-clamp-2">{post.angle}</strong><small>Modifié {relativeDate(post.updatedAt).toLowerCase()}</small></button>) : <button className="carnet-note" onClick={() => void createNote().catch(() => {})}><strong>Aucune note</strong><small>Nouvelle note</small></button>}<div className="carnet-footer"><button onClick={() => go('notes')}>Voir toutes les notes</button><ArrowRight aria-hidden="true" /></div></section><section className="source-summary"><div className="source-summary-heading"><h3>Sources actives</h3><button onClick={() => go('sources')}>Gérer</button></div>{activeFeeds.slice(0,4).map(feed => <button key={feed.id} className="source-summary-row" onClick={() => selectFeed(feed.id)}><span className="source-letter" aria-hidden="true">{feed.name.charAt(0)}</span><span className="source-name">{feed.name.replace(' (France)', '')}</span><Rss size={12} aria-label="Flux activé" style={{ marginLeft: 'auto', color: 'var(--ink-muted)' }} /></button>)}</section></aside></div>}
+        <div className="workspace-frame" hidden={view !== 'notes' && view !== 'planning'}><NotesWorkspace posts={posts} selectedPostId={selectedPostId} onSelectPost={id => { setSelectedPostId(id); if (id) go('notes'); }} onNewPost={date => createNote(undefined, date)} onSavePost={savePost} onDeletePost={deletePost} mode={view === 'planning' ? 'planning' : 'notes'} /></div>
+        {view === 'sources' && <SourceManager feeds={feeds} onFeedsChange={handleFeedsChange} onSelectFeed={selectFeed} initialAddOpen={openAdd} />}
       </main>
-
-      {/* Modal: Add custom feed */}
-      <AddFeedModal
-        isOpen={isAddFeedOpen}
-        onClose={() => setIsAddFeedOpen(false)}
-        onFeedAdded={(newFeed) => {
-          setFeeds((prev) => [...prev, newFeed]);
-          fetchArticles(true);
-        }}
-      />
-
-      {/* Modal: Manage & toggle feeds */}
-      <ManageFeedsModal
-        isOpen={isManageFeedsOpen}
-        onClose={() => setIsManageFeedsOpen(false)}
-        feeds={feeds}
-        onToggleFeed={handleToggleFeed}
-        onDeleteFeed={handleDeleteFeed}
-        onOpenAddModal={() => setIsAddFeedOpen(true)}
-      />
     </div>
-  );
+    <ArticleReader article={activeArticle} onClose={() => setActiveArticleId(null)} onToggleSave={toggleSave} onToggleRead={toggleRead} onCreateNote={article => createNote(article)} />
+    {toast && <div className="toast" role="status"><Check aria-hidden="true" />{toast}</div>}
+  </div>;
 }
