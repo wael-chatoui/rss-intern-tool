@@ -18,7 +18,6 @@ interface RuntimeCache {
   warnings: string[];
 }
 const cacheGlobal = globalThis as typeof globalThis & { __rssRuntimeCache?: RuntimeCache };
-const TEMPORARY_CACHE_WARNING = 'Le cache RSS est temporaire sur cet hébergement.';
 function feedSignature(feeds: DatabaseSchema['feeds']): string {
   return JSON.stringify(feeds.filter(feed => feed.enabled));
 }
@@ -112,6 +111,7 @@ export async function GET(req: Request) {
     let db = await getDb();
     const runtimeCache = cacheGlobal.__rssRuntimeCache;
     const useRuntimeCache = runtimeCache?.feeds === feedSignature(db.feeds);
+    let cacheIsTemporary = Boolean(useRuntimeCache);
     if (useRuntimeCache && runtimeCache) {
       db.cachedArticles = runtimeCache.articles;
       db.lastFetchedAt = runtimeCache.lastFetchedAt;
@@ -165,8 +165,8 @@ export async function GET(req: Request) {
         return latest;
       });
       db = saved.database;
+      cacheIsTemporary = saved.temporary;
       if (saved.temporary) {
-        warnings.push(TEMPORARY_CACHE_WARNING);
         cacheGlobal.__rssRuntimeCache = {
           feeds: feedSignature(db.feeds), articles: db.cachedArticles || [],
           lastFetchedAt: db.lastFetchedAt, warnings: [...warnings],
@@ -189,8 +189,8 @@ export async function GET(req: Request) {
         return latest;
       });
       db = saved.database;
+      cacheIsTemporary = saved.temporary;
       if (saved.temporary) {
-        if (!warnings.includes(TEMPORARY_CACHE_WARNING)) warnings.push(TEMPORARY_CACHE_WARNING);
         cacheGlobal.__rssRuntimeCache = {
           feeds: feedSignature(db.feeds), articles: db.cachedArticles || [],
           lastFetchedAt: db.lastFetchedAt, warnings: [...warnings],
@@ -224,6 +224,7 @@ export async function GET(req: Request) {
       activeFeedsCount: targetFeeds.length,
       lastFetchedAt: db.lastFetchedAt,
       isFromCache,
+      cacheIsTemporary,
       warnings,
     });
   } catch (error) {

@@ -104,6 +104,8 @@ async function main() {
   });
   let response = await readonly.get();
   assert.equal(response.status, 200, 'a failed cache write must not discard successfully fetched articles');
+  assert.equal(response.body.cacheIsTemporary, true);
+  assert.deepEqual(response.body.warnings, [sourceWarning], 'only unavailable sources count as source warnings');
   assert.deepEqual(response.body.articles.map(item => item.id), [article(15).id, article(11, feeds[1]).id]);
   assert.equal(response.body.lastFetchedAt, new Date(NOW).toISOString());
   assert.equal(response.body.isFromCache, false);
