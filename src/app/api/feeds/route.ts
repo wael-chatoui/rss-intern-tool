@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getDb, updateDb } from '@/lib/db';
 import { FeedSource } from '@/types';
-import Parser from 'rss-parser';
+import { feedErrorMessage, parseFeedUrl } from '@/lib/rss';
+import { resolveFeedUrl } from '@/lib/feed-catalog';
 
-const parser = new Parser({ timeout: 5000 });
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
@@ -20,16 +20,17 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { name, url, category, language, website } = body;
 
-    if (!name || !url) {
+    if (typeof name !== 'string' || !name.trim() || typeof url !== 'string' || !url.trim()) {
       return NextResponse.json({ error: 'Le nom et l\'URL du flux sont requis.' }, { status: 400 });
     }
 
+    const feedUrl = resolveFeedUrl(url);
     // Quick verification that the URL is a readable RSS feed
     try {
-      await parser.parseURL(url);
+      await parseFeedUrl(feedUrl);
     } catch (parseError) {
       return NextResponse.json(
-        { error: 'Impossible de lire ce flux RSS. Vérifiez que l\'URL pointe bien vers un flux XML/RSS valide.' },
+        { error: `Impossible de lire ce flux RSS : ${feedErrorMessage(parseError)}.` },
         { status: 422 }
       );
     }
@@ -37,10 +38,10 @@ export async function POST(req: Request) {
     const newFeed: FeedSource = {
       id: `custom-${crypto.randomUUID()}`,
       name: name.trim(),
-      url: url.trim(),
+      url: feedUrl,
       category: category || 'trends',
       language: language || 'fr',
-      website: website || url,
+      website: typeof website === 'string' && website.trim() ? website.trim() : feedUrl,
       enabled: true,
     };
 

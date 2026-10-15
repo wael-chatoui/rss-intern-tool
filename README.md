@@ -34,4 +34,8 @@ Next.js 14, React 18, TypeScript, Tailwind CSS, Lucide et rss-parser. L’applic
 
 Le cache RSS dure dix minutes. Une source indisponible conserve ses derniers articles et affiche un avertissement lors de l’actualisation. Les identifiants d’articles sont stables et distincts par source et lien ; les anciens identifiants sont migrés automatiquement. Les contenus RSS sont affichés comme texte sûr dans le lecteur.
 
+Sur un hébergement en lecture seule comme Vercel, le cache RSS utilise la mémoire du processus si son écriture est refusée. Les articles restent consultables et un avertissement indique que ce cache est temporaire. Cette solution concerne uniquement le cache RSS : un stockage persistant reste nécessaire pour enregistrer durablement les notes et les préférences sur un hébergement serveur. Les anciennes adresses intégrées ELLE, FashionNetwork, Madame Figaro et Dazed sont migrées vers les flux officiels vérifiés. Dazed couvre désormais la mode et la culture. Les erreurs HTTP, délais et réponses invalides sont signalés par source.
+
+Tests RSS isolés : `npm run test:rss` (serveur HTTP local de test, sans données utilisateur).
+
 Les choix graphiques sont documentés dans `.ui-craft/brief.md` et `.ui-craft/tokens.md`. Les composants actifs de la refonte sont dans `src/components/Newsroom`.

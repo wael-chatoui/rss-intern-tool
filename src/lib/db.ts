@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { DatabaseSchema, FeedSource } from '@/types';
+import { FEED_URL_REPLACEMENTS } from '@/lib/feed-catalog';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
@@ -19,7 +20,7 @@ export const DEFAULT_FEEDS: FeedSource[] = [
   {
     id: 'fashionnetwork-fr',
     name: 'FashionNetwork (France)',
-    url: 'https://fr.fashionnetwork.com/rss/news/',
+    url: 'https://fr.fashionnetwork.com/rss/feed/fr,0.xml',
     category: 'business',
     language: 'fr',
     website: 'https://fr.fashionnetwork.com',
@@ -28,7 +29,7 @@ export const DEFAULT_FEEDS: FeedSource[] = [
   {
     id: 'elle-fr',
     name: 'ELLE Mode',
-    url: 'https://www.elle.fr/Mode/rss',
+    url: 'https://www.elle.fr/var/plain_site/storage/flux_rss/fluxMode.xml',
     category: 'trends',
     language: 'fr',
     website: 'https://www.elle.fr',
@@ -37,7 +38,7 @@ export const DEFAULT_FEEDS: FeedSource[] = [
   {
     id: 'madame-figaro',
     name: 'Madame Figaro Mode',
-    url: 'https://madame.lefigaro.fr/mode/feed',
+    url: 'https://www.lefigaro.fr/rss/madame_style.xml',
     category: 'haute-couture',
     language: 'fr',
     website: 'https://madame.lefigaro.fr',
@@ -90,8 +91,8 @@ export const DEFAULT_FEEDS: FeedSource[] = [
   },
   {
     id: 'dazed-fashion',
-    name: 'Dazed Fashion',
-    url: 'https://www.dazeddigital.com/rss/fashion',
+    name: 'Dazed (mode & culture)',
+    url: 'https://www.dazeddigital.com/rss',
     category: 'trends',
     language: 'en',
     website: 'https://www.dazeddigital.com',
@@ -194,6 +195,16 @@ async function readDatabaseFile(): Promise<DatabaseSchema> {
     const data = JSON.parse(raw) as DatabaseSchema;
     // An empty source list is an intentional user choice.
     if (!Array.isArray(data.feeds)) data.feeds = structuredClone(DEFAULT_FEEDS);
+    // Migrate only obsolete built-in addresses, without writing during reads.
+    // Custom URLs, disabled sources and user metadata remain intact.
+    data.feeds = data.feeds.map(feed => {
+      const replacement = FEED_URL_REPLACEMENTS.find(item => item.feedId === feed.id && item.oldUrl === feed.url);
+      if (!replacement) return feed;
+      return {
+        ...feed, url: replacement.url,
+        name: feed.id === 'dazed-fashion' && feed.name === 'Dazed Fashion' ? 'Dazed (mode & culture)' : feed.name,
+      };
+    });
     if (!Array.isArray(data.savedArticles)) data.savedArticles = [];
     if (!Array.isArray(data.posts)) data.posts = [];
     return data;

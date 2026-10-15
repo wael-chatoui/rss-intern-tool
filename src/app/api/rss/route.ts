@@ -4,9 +4,41 @@ import { createArticleId, fetchAllActiveFeeds } from '@/lib/rss';
 import { DatabaseSchema, RSSArticle } from '@/types';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const STABLE_ID_PATTERN = /^rss_[a-f0-9]{24}$/;
+
+// Vercel's deployment filesystem is read-only. RSS caching must remain optional:
+// an unavailable cache write must never discard successfully fetched articles.
+interface RuntimeCache {
+  feeds: string;
+  articles: RSSArticle[];
+  lastFetchedAt?: string;
+  warnings: string[];
+}
+const cacheGlobal = globalThis as typeof globalThis & { __rssRuntimeCache?: RuntimeCache };
+const TEMPORARY_CACHE_WARNING = 'Le cache RSS est temporaire sur cet hébergement.';
+function feedSignature(feeds: DatabaseSchema['feeds']): string {
+  return JSON.stringify(feeds.filter(feed => feed.enabled));
+}
+function isReadOnlyStorage(error: unknown): boolean {
+  return ['EROFS', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException)?.code || '');
+}
+
+async function saveRssCache(mutate: (latest: DatabaseSchema) => DatabaseSchema): Promise<{ database: DatabaseSchema; temporary: boolean }> {
+  let pending: DatabaseSchema | undefined;
+  try {
+    const database = await updateDb(latest => {
+      pending = mutate(latest);
+      return pending;
+    });
+    return { database, temporary: false };
+  } catch (error) {
+    if (!pending || !isReadOnlyStorage(error)) throw error;
+    return { database: pending, temporary: true };
+  }
+}
 
 function articleIdentity(article: RSSArticle): string {
   return `${article.feedId}:${article.link || `${article.title}:${article.pubDate}`}`;
@@ -78,6 +110,12 @@ export async function GET(req: Request) {
     const forceRefresh = searchParams.get('refresh') === 'true';
 
     let db = await getDb();
+    const runtimeCache = cacheGlobal.__rssRuntimeCache;
+    const useRuntimeCache = runtimeCache?.feeds === feedSignature(db.feeds);
+    if (useRuntimeCache && runtimeCache) {
+      db.cachedArticles = runtimeCache.articles;
+      db.lastFetchedAt = runtimeCache.lastFetchedAt;
+    }
     let needsSave = normalizeStoredArticles(db);
     let targetFeeds = db.feeds.filter(feed => feed.enabled);
     const activeFeedIds = new Set(targetFeeds.map(feed => feed.id));
@@ -88,7 +126,7 @@ export async function GET(req: Request) {
     const lastFetched = db.lastFetchedAt ? new Date(db.lastFetchedAt).getTime() : 0;
     const isCacheExpired = previousCache.length === 0 || !lastFetched || Date.now() - lastFetched > CACHE_TTL_MS;
     let allRawArticles = previousCache;
-    let warnings: string[] = [];
+    let warnings: string[] = useRuntimeCache && runtimeCache ? [...runtimeCache.warnings] : [];
     let isFromCache = !forceRefresh && !isCacheExpired;
 
     if (forceRefresh || isCacheExpired) {
@@ -97,7 +135,11 @@ export async function GET(req: Request) {
 
       // The network runs outside the lock; merge into the latest persisted state
       // inside one transaction so concurrent note and bookmark saves are retained.
-      db = await updateDb(latest => {
+      const saved = await saveRssCache(latest => {
+        if (useRuntimeCache && runtimeCache) {
+          latest.cachedArticles = runtimeCache.articles;
+          latest.lastFetchedAt = runtimeCache.lastFetchedAt;
+        }
         normalizeStoredArticles(latest);
         targetFeeds = latest.feeds.filter(feed => feed.enabled);
         const currentActiveFeedIds = new Set(targetFeeds.map(feed => feed.id));
@@ -122,16 +164,38 @@ export async function GET(req: Request) {
         normalizeStoredArticles(latest);
         return latest;
       });
+      db = saved.database;
+      if (saved.temporary) {
+        warnings.push(TEMPORARY_CACHE_WARNING);
+        cacheGlobal.__rssRuntimeCache = {
+          feeds: feedSignature(db.feeds), articles: db.cachedArticles || [],
+          lastFetchedAt: db.lastFetchedAt, warnings: [...warnings],
+        };
+      } else {
+        delete cacheGlobal.__rssRuntimeCache;
+      }
       needsSave = false;
     }
 
     if (needsSave) {
-      db = await updateDb(latest => {
+      const saved = await saveRssCache(latest => {
+        if (useRuntimeCache && runtimeCache) {
+          latest.cachedArticles = runtimeCache.articles;
+          latest.lastFetchedAt = runtimeCache.lastFetchedAt;
+        }
         normalizeStoredArticles(latest);
         const activeIds = new Set(latest.feeds.filter(feed => feed.enabled).map(feed => feed.id));
         latest.cachedArticles = (latest.cachedArticles || []).filter(article => activeIds.has(article.feedId));
         return latest;
       });
+      db = saved.database;
+      if (saved.temporary) {
+        if (!warnings.includes(TEMPORARY_CACHE_WARNING)) warnings.push(TEMPORARY_CACHE_WARNING);
+        cacheGlobal.__rssRuntimeCache = {
+          feeds: feedSignature(db.feeds), articles: db.cachedArticles || [],
+          lastFetchedAt: db.lastFetchedAt, warnings: [...warnings],
+        };
+      }
     }
     targetFeeds = db.feeds.filter(feed => feed.enabled);
     allRawArticles = db.cachedArticles || [];
