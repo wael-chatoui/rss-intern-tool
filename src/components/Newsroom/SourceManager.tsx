@@ -1,5 +1,7 @@
 'use client';
 
+import { authenticatedFetch } from '@/lib/auth-client';
+
 import { FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowUpRight, Check, ChevronRight, Loader2, Plus, Rss, Search, Trash2, X } from 'lucide-react';
 import { FashionCategory, FeedSource } from '@/types';
@@ -60,7 +62,7 @@ export function SourceManager({ feeds, onFeedsChange, onSelectFeed, initialAddOp
     setError('');
     setNotice('');
     try {
-      const response = await fetch(remove ? `/api/feeds?id=${encodeURIComponent(feed.id)}` : '/api/feeds', {
+      const response = await authenticatedFetch(remove ? `/api/feeds?id=${encodeURIComponent(feed.id)}` : '/api/feeds', {
         method: remove ? 'DELETE' : 'PATCH',
         ...(!remove && { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: feed.id, enabled: !feed.enabled }) }),
       });
@@ -85,7 +87,7 @@ export function SourceManager({ feeds, onFeedsChange, onSelectFeed, initialAddOp
     }
     setSubmitting(true);
     try {
-      const response = await fetch('/api/feeds', {
+      const response = await authenticatedFetch('/api/feeds', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), url: url.trim(), website: website.trim() || url.trim(), category, language }),
       });

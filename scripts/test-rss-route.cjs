@@ -46,6 +46,7 @@ function harness({ database = baseline(), fetchResult, writeError } = {}) {
   }
   const imports = {
     'next/server': { NextResponse },
+    '@/lib/auth': { protectApi: async () => null },
     '@/lib/db': {
       getDb: async () => structuredClone(persisted),
       updateDb: async mutate => {

@@ -25,3 +25,11 @@ Next.js 14, React 18, Tailwind et CSS, Lucide. Garder la base existante et ses f
 
 ## Composition
 Navigation latérale 224 px, barre de contexte 64 px, espace de veille large et carnet secondaire. Sur mobile, navigation repliée et contenu sur une seule colonne. Notes : liste de sujets puis page d'écriture. Planning : tableau ou calendrier.
+
+Import / export : choix du contenu, du format et de la sélection. L’import présente les changements et doublons avant écriture. Les sauvegardes restent accessibles dans un onglet dédié. PDF pour les notes et les articles, extraction de texte pour l’import de notes.
+
+
+## Accueil public et accès propriétaire
+- 2026-10-15 : ajout demandé d’une landing et d’une authentification. Un seul compte propriétaire e-mail/mot de passe protège l’espace existant.
+- Charte existante conservée : papier, vert forêt, Newsreader et DM Sans. Landing factuelle à hero asymétrique, variance 7, signature : capture réelle recadrée du produit avec données de démonstration. Aucun tarif ni témoignage inventé.
+- Connexion à deux panneaux, variance 4. Signature : accueil lié au métier, « Retrouvez vos sources et vos notes ». Étiquettes visibles, erreurs accessibles, affichage du mot de passe, session de sept jours et déconnexion.

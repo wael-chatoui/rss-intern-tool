@@ -92,6 +92,7 @@ async function main() {
     }
     const route = load('src/app/api/feeds/route.ts', {
       '@/lib/rss': rss, '@/lib/feed-catalog': catalog,
+      '@/lib/auth': { protectApi: async () => null },
       '@/lib/db': { updateDb: async mutate => { const db = { feeds: [] }; const result = await mutate(db); storedFeed = db.feeds[0]; writes++; return result; } },
       'next/server': { NextResponse },
     });

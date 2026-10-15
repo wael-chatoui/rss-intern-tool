@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import { DatabaseSchema, FeedSource } from '@/types';
 import { FEED_URL_REPLACEMENTS } from '@/lib/feed-catalog';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+export const DATA_DIR = process.env.RSS_DATA_DIR ? path.resolve(process.env.RSS_DATA_DIR) : path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 export const DEFAULT_FEEDS: FeedSource[] = [

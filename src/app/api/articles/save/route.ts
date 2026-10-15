@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server';
+import { protectApi } from '@/lib/auth';
 import { getDb, updateDb } from '@/lib/db';
 import { RSSArticle } from '@/types';
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
+  const denied = await protectApi(req);
+  if (denied) return denied;
   try {
     const article: RSSArticle = await req.json();
 
@@ -28,7 +31,9 @@ export async function POST(req: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const denied = await protectApi(req);
+  if (denied) return denied;
   try {
     const db = await getDb();
     return NextResponse.json({ savedArticles: db.savedArticles || [] });

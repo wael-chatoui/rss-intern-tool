@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { protectApi } from '@/lib/auth';
 import { getDb, updateDb } from '@/lib/db';
 import { FeedSource } from '@/types';
 import { feedErrorMessage, parseFeedUrl } from '@/lib/rss';
@@ -6,7 +7,9 @@ import { resolveFeedUrl } from '@/lib/feed-catalog';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: Request) {
+  const denied = await protectApi(req);
+  if (denied) return denied;
   try {
     const db = await getDb();
     return NextResponse.json({ feeds: db.feeds });
@@ -16,6 +19,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const denied = await protectApi(req);
+  if (denied) return denied;
   try {
     const body = await req.json();
     const { name, url, category, language, website } = body;
@@ -56,6 +61,8 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
+  const denied = await protectApi(req);
+  if (denied) return denied;
   try {
     const body = await req.json();
     const { id, enabled } = body;
@@ -77,6 +84,8 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const denied = await protectApi(req);
+  if (denied) return denied;
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');

@@ -246,3 +246,9 @@ button { transition: background-color var(--duration-fast), color var(--duration
 .carnet-header h2 { font-size: 21px; }
 .workspace-frame { height: calc(100dvh - 190px); }
 @media (max-width:767px) { .page-heading h1 { font-size: 30px; } }
+
+.page-actions { display: flex; align-items: center; gap: 10px; }
+.notes-export-format { max-width: 120px; min-height: 36px; padding: 6px 7px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 5px; font-size: 12px !important; }
+.notes-export-notice { margin-bottom: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 6px; color: var(--brand); background: var(--brand-soft); font-size: 12px; }
+@media (max-width: 767px) { .page-heading { align-items: center; } .page-heading h1 { font-size: 28px; } .page-actions { gap: 7px; } .notes-editor-toolbar { flex-wrap: wrap; gap: 5px; } .notes-export-format { max-width: 95px; } }
+@media (max-width: 520px) { .page-heading .page-actions .btn { min-width: 39px; } .notes-export-format { font-size: 12px !important; min-height: 36px; max-width: 90px; } }

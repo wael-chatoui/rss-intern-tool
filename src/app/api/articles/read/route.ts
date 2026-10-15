@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
+import { protectApi } from '@/lib/auth';
 import { updateDb } from '@/lib/db';
 
 export async function POST(req: Request) {
+  const denied = await protectApi(req);
+  if (denied) return denied;
   try {
     const { articleId, read } = await req.json();
 

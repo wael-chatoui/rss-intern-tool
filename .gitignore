@@ -31,3 +31,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local import recovery snapshots
+/data/backups/
+/data/.db-*.tmp
+/public/vendor/
+
+# Private owner credentials and server sessions
+/data/auth.json
+/data/.auth-*.tmp
+/.next-auth-preview/

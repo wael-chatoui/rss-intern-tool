@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle, ArrowLeft, ArrowRight, BookOpen, CalendarDays, Check, CheckCheck,
   ChevronLeft, ChevronRight, Clock3, Download, ExternalLink, FileText, LayoutGrid,
@@ -13,6 +13,7 @@ import {
 import { fr } from 'date-fns/locale';
 import { PostStatus, SocialPlatform, SocialPost } from '@/types';
 import './notes.css';
+import { buildTransferExport, type ExportFormat } from '@/lib/transfer-formats';
 
 interface NotesWorkspaceProps {
   posts: SocialPost[];
@@ -45,15 +46,10 @@ const dateLabel = (value?: string) => {
   return Number.isNaN(date.getTime()) ? value : format(date, 'd MMM', { locale: fr });
 };
 
-function markdownFor(post: NotePost) {
-  const source = post.sourceArticleTitle
-    ? `\n## Source\n${post.sourceArticleLink ? `[${post.sourceArticleTitle}](${post.sourceArticleLink})` : post.sourceArticleTitle}${post.sourceArticleFeed ? `\n\n${post.sourceArticleFeed}` : ''}\n`
-    : '';
-  return `# ${titleFor(post)}\n\n${post.notes || ''}\n\nStatut : ${labelForStatus(post.status)}\n${post.scheduledDate ? `Publication : ${post.scheduledDate}${post.scheduledTime ? ` à ${post.scheduledTime}` : ''}\n` : ''}${post.tags.length ? `Mots-clés : ${post.tags.join(', ')}\n` : ''}${source}\n## TikTok\n\n### Accroche\n${post.content.tiktok.hook}\n\n### Script\n${post.content.tiktok.script}\n\n### Mise en images\n${post.content.tiktok.visualNotes}\n\nDurée : ${post.content.tiktok.durationEstimate}\n\n## Instagram\n\n${post.content.instagram.caption}\n\n${post.content.instagram.carouselSlides.map((slide, index) => `### Diapositive ${index + 1}\n${slide}`).join('\n\n')}\n\n${post.content.instagram.hashtags.join(' ')}\n\n## LinkedIn\n\n### ${post.content.linkedin.title || 'Titre'}\n${post.content.linkedin.body}\n\n${post.content.linkedin.keyTakeaways.map((item) => `- ${item}`).join('\n')}\n`;
-}
+export interface NotesWorkspaceHandle { flush: () => Promise<void>; }
 
 /** Drafts and save queues are keyed by note, so a delayed save can never write into another note. */
-export function NotesWorkspace({ posts, selectedPostId, onSelectPost, onNewPost, onSavePost, onDeletePost, mode }: NotesWorkspaceProps) {
+export const NotesWorkspace = forwardRef<NotesWorkspaceHandle, NotesWorkspaceProps>(function NotesWorkspace({ posts, selectedPostId, onSelectPost, onNewPost, onSavePost, onDeletePost, mode }, ref) {
   const drafts = useRef(new Map<string, NotePost>());
   const versions = useRef(new Map<string, number>());
   const dirty = useRef(new Set<string>());
@@ -70,6 +66,9 @@ export function NotesWorkspace({ posts, selectedPostId, onSelectPost, onNewPost,
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('md');
+  const [exporting, setExporting] = useState(false);
+  const [exportNotice, setExportNotice] = useState('');
   const [planView, setPlanView] = useState<'board' | 'calendar'>('board');
   const [month, setMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState(() => new Date());
@@ -115,6 +114,8 @@ export function NotesWorkspace({ posts, selectedPostId, onSelectPost, onNewPost,
     await request;
     if (dirty.current.has(id)) return persist(id);
   }, [updateSaveState]);
+
+  useImperativeHandle(ref, () => ({ flush: async () => { await Promise.all(Array.from(dirty.current).map(id => persist(id))); } }), [persist]);
 
   useEffect(() => {
     for (const post of posts) {
@@ -204,14 +205,17 @@ export function NotesWorkspace({ posts, selectedPostId, onSelectPost, onNewPost,
       setActionError('La note n’a pas pu être supprimée. Réessayez.');
     } finally { setDeleting(false); }
   };
-  const exportNote = () => {
-    if (!selected) return;
-    const url = URL.createObjectURL(new Blob([markdownFor(selected)], { type: 'text/markdown;charset=utf-8' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${titleFor(selected).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').slice(0, 70) || 'note'}.md`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const exportNote = async () => {
+    if (!selected || exporting) return;
+    setExporting(true); setActionError(''); setExportNotice('');
+    try {
+      const result = await buildTransferExport({ version: 1, kind: 'notes', exportedAt: new Date().toISOString(), posts: [selected] }, 'notes', exportFormat);
+      const url = URL.createObjectURL(new Blob([new Uint8Array(result.bytes).buffer], { type: result.mime }));
+      const link = document.createElement('a'); link.href = url; link.download = result.filename; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setExportNotice(result.warnings?.join(' ') || 'Note exportée.');
+    } catch (cause) { setActionError(cause instanceof Error ? cause.message : 'L’export a échoué. Réessayez.'); }
+    finally { setExporting(false); }
   };
   const editContent = <T extends SocialPlatform>(platform: T, update: Partial<SocialPost['content'][T]>) => {
     if (!selected) return;
@@ -237,7 +241,7 @@ export function NotesWorkspace({ posts, selectedPostId, onSelectPost, onNewPost,
           {selectedState === 'error' && <button onClick={() => { void persist(selected.id).catch(() => undefined); }}>Réessayer</button>}
         </div>
         <div className="notes-editor-actions">
-          <button className="notes-action" onClick={exportNote} aria-label="Exporter la note en Markdown" title="Exporter la note en Markdown"><Download size={16} /><span>Exporter</span></button>
+          <select className="notes-export-format" aria-label="Format d’export de la note" value={exportFormat} onChange={event => setExportFormat(event.target.value as ExportFormat)} disabled={exporting}><option value="md">Markdown</option><option value="txt">Texte</option><option value="html">HTML</option><option value="json">JSON</option><option value="pdf">PDF</option></select><button className="notes-action" onClick={() => void exportNote()} disabled={exporting} aria-label="Exporter la note" title="Exporter la note">{exporting ? <Loader2 size={16} className="notes-spinner" /> : <Download size={16} />}<span>Exporter</span></button>
           <button className="notes-icon" onClick={() => setConfirmDelete(true)} aria-label="Supprimer cette note" title="Supprimer cette note"><Trash2 size={17} /></button>
         </div>
       </div>
@@ -320,6 +324,7 @@ export function NotesWorkspace({ posts, selectedPostId, onSelectPost, onNewPost,
   };
 
   return <section className={`notes-workspace ${mode === 'planning' ? 'notes-is-planning' : ''} ${selected ? 'notes-has-selection' : ''}`}>
+    {exportNotice && <p className="notes-export-notice" role="status">{exportNotice}</p>}
     {actionError && <div className="notes-action-error" role="alert"><AlertCircle size={17} /><span>{actionError}</span><button className="notes-icon" onClick={() => setActionError('')} aria-label="Fermer le message"><X size={17} /></button></div>}
     {failedIds.length > 0 && <div className="notes-action-error" role="alert"><AlertCircle size={17} /><span>{failedIds.length === 1 ? 'Une note attend d’être enregistrée.' : `${failedIds.length} notes attendent d’être enregistrées.`} Vos modifications sont conservées dans ce carnet.</span><button className="notes-action" onClick={() => { failedIds.forEach((id) => { void persist(id).catch(() => undefined); }); }}>Réessayer</button></div>}
     {mode === 'notes' ? <div className="notes-layout"><aside className="notes-list-panel" aria-label="Vos notes"><div className="notes-list-toolbar"><div className="notes-list-heading"><h2>Toutes les notes</h2><span>{mergedPosts.length}</span></div><label className="notes-search"><Search size={17} /><span className="notes-sr-only">Rechercher dans les notes</span><input placeholder="Rechercher une note…" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button onClick={() => setSearch('')} aria-label="Effacer la recherche"><X size={15} /></button>}</label><label className="notes-filter"><span>Afficher</span><select value={filter} onChange={(event) => setFilter(event.target.value as PostStatus | 'all')}><option value="all">Tous les statuts</option>{statuses.map((status) => <option key={status.id} value={status.id}>{status.label}</option>)}</select></label></div><div className="notes-list">{filteredPosts.length ? filteredPosts.map((post) => <button key={post.id} className={`notes-list-item ${selectedPostId === post.id ? 'is-active' : ''}`} onClick={() => select(post.id)} aria-current={selectedPostId === post.id ? 'true' : undefined}><div className="notes-list-item-top"><span className={`notes-status-mark notes-status-${post.status}`} /><span>{labelForStatus(post.status)}</span><time dateTime={post.updatedAt}>{dateLabel(post.updatedAt.slice(0, 10))}</time>{saveStates[post.id] === 'error' && <AlertCircle size={14} aria-label="Enregistrement à réessayer" />}</div><h3>{titleFor(post)}</h3><p>{excerptFor(post)}</p><div className="notes-list-item-bottom">{post.sourceArticleFeed ? <span><BookOpen size={12} />{post.sourceArticleFeed}</span> : <span>Note libre</span>}{post.tags.filter((tag) => tag.trim()).length > 0 && <span>{post.tags.filter((tag) => tag.trim()).slice(0, 2).join(' · ')}</span>}</div></button>) : <div className="notes-list-empty"><FileText size={25} /><h3>{search || filter !== 'all' ? 'Aucune note trouvée' : 'Aucune note'}</h3><p>{search || filter !== 'all' ? 'Essayez un autre mot ou affichez tous les statuts.' : 'Créez une note ou sélectionnez un article dans la veille.'}</p>{search || filter !== 'all' ? <button className="notes-action" onClick={() => { setSearch(''); setFilter('all'); }}>Réinitialiser les filtres</button> : <button className="notes-action" disabled={creating} onClick={() => { void create(); }}><Plus size={15} />Créer une note</button>}</div>}</div></aside>{noteEditor}</div> : <>
@@ -327,4 +332,4 @@ export function NotesWorkspace({ posts, selectedPostId, onSelectPost, onNewPost,
       {planView === 'board' ? <div className="planning-board">{statuses.map((status) => { const columnPosts = mergedPosts.filter((post) => post.status === status.id); return <section className={`planning-column planning-column-${status.id}`} key={status.id}><header><div><span className={`notes-status-mark notes-status-${status.id}`} /><h2>{status.label}</h2><span className="planning-column-count">{columnPosts.length}</span></div><p>{status.hint}</p></header><div className="planning-column-cards">{columnPosts.map(planningPost)}{columnPosts.length === 0 && <div className="planning-column-empty">{status.id === 'idea' ? <><FileText size={22} /><p>Aucun sujet à explorer.</p><button className="notes-action" disabled={creating} onClick={() => { void create(); }}><Plus size={15} />Ajouter un sujet</button></> : status.id === 'published' ? <><CheckCheck size={22} /><p>Aucune publication.</p></> : <p>Aucun sujet.</p>}</div>}</div></section>; })}</div> : <div className="planning-calendar-layout"><div className="planning-calendar"><header><div className="planning-month-nav"><button className="notes-icon" aria-label="Mois précédent" onClick={() => setMonth(addMonths(month, -1))}><ChevronLeft size={19} /></button><h2>{format(month, 'MMMM yyyy', { locale: fr })}</h2><button className="notes-icon" aria-label="Mois suivant" onClick={() => setMonth(addMonths(month, 1))}><ChevronRight size={19} /></button></div><button className="notes-action" onClick={() => { const today = new Date(); setMonth(today); setSelectedDate(today); }}>Aujourd’hui</button></header><div className="planning-weekdays">{['Lun.', 'Mar.', 'Mer.', 'Jeu.', 'Ven.', 'Sam.', 'Dim.'].map((day) => <span key={day}>{day}</span>)}</div><div className="planning-days">{calendarDays.map((day) => { const key = format(day, 'yyyy-MM-dd'); const dayPosts = mergedPosts.filter((post) => post.scheduledDate === key); return <button ref={(element) => { if (element) calendarButtons.current.set(key, element); else calendarButtons.current.delete(key); }} key={key} className={`planning-day ${!isSameMonth(day, month) ? 'is-other-month' : ''} ${isSameDay(day, selectedDate) ? 'is-selected' : ''} ${isSameDay(day, new Date()) ? 'is-today' : ''}`} aria-pressed={isSameDay(day, selectedDate)} aria-label={`${format(day, 'EEEE d MMMM yyyy', { locale: fr })}, ${dayPosts.length} sujet${dayPosts.length > 1 ? 's' : ''}`} onClick={() => setSelectedDate(day)} onKeyDown={(event) => calendarKeyDown(event, day)}><span className="planning-day-number">{format(day, 'd')}</span><span className="planning-day-posts">{dayPosts.slice(0, 2).map((post) => <span key={post.id}>{titleFor(post)}</span>)}{dayPosts.length > 2 && <span className="planning-more">+{dayPosts.length - 2} sujets</span>}</span>{dayPosts.length > 0 && <span className="planning-day-mobile-count">{dayPosts.length}</span>}</button>; })}</div><p className="planning-calendar-help">Sélectionnez une date pour afficher les sujets planifiés.</p></div><aside className="planning-day-inspector"><header><span>Sujets planifiés</span><h2>{format(selectedDate, 'EEEE d MMMM', { locale: fr })}</h2><button className="notes-primary" disabled={creating} onClick={() => { void create(selectedDateKey); }}><Plus size={16} />{creating ? 'Création…' : 'Ajouter un sujet'}</button></header><div className="planning-day-list">{scheduledPosts.length ? scheduledPosts.map((post) => <button key={post.id} className="planning-scheduled-post" onClick={() => select(post.id)}><span><Clock3 size={14} />{post.scheduledTime || 'Heure à définir'}</span><h3>{titleFor(post)}</h3><div><span>{labelForStatus(post.status)}</span><ArrowRight size={16} /></div></button>) : <div className="planning-day-empty"><CalendarDays size={28} /><h3>Aucun sujet planifié</h3><p>Ajoutez un sujet pour cette date.</p></div>}</div></aside></div>}
     </>}
   </section>;
-}
+});

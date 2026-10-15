@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { protectApi } from '@/lib/auth';
 import { getDb, updateDb } from '@/lib/db';
 import { createArticleId, fetchAllActiveFeeds } from '@/lib/rss';
 import { DatabaseSchema, RSSArticle } from '@/types';
@@ -100,6 +101,8 @@ function normalizeStoredArticles(db: DatabaseSchema): boolean {
 }
 
 export async function GET(req: Request) {
+  const denied = await protectApi(req);
+  if (denied) return denied;
   try {
     const { searchParams } = new URL(req.url);
     const feedId = searchParams.get('feedId');

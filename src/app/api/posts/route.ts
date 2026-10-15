@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
+import { protectApi } from '@/lib/auth';
 import { getDb, updateDb } from '@/lib/db';
 import { SocialPost } from '@/types';
 
-export async function GET() {
+export async function GET(req: Request) {
+  const denied = await protectApi(req);
+  if (denied) return denied;
   try {
     const db = await getDb();
     return NextResponse.json({ posts: db.posts || [] });
@@ -14,6 +17,8 @@ export async function GET() {
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
+  const denied = await protectApi(req);
+  if (denied) return denied;
   try {
     const body = await req.json();
     const newPost: SocialPost = {
@@ -64,6 +69,8 @@ export async function POST(req: Request) {
 }
 
 export async function PUT(req: Request) {
+  const denied = await protectApi(req);
+  if (denied) return denied;
   try {
     const updatedPost: SocialPost = await req.json();
     if (!updatedPost || !updatedPost.id) {
@@ -87,6 +94,8 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const denied = await protectApi(req);
+  if (denied) return denied;
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
