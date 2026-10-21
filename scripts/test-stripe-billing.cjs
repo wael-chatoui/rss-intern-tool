@@ -85,12 +85,17 @@ async function main() {
     currentSubscription.items.data[0].price.id = 'price_fixture';
     await service.synchronizeStripeEvent({ ...event, id: 'evt_price_restored', created: 102 }, stripe);
     assert.equal(await billing.hasWorkspaceAccess(first), true);
+    currentSubscription.items.data[0].price.active = false;
+    currentSubscription.items.data[0].price.product.active = false;
+    await service.synchronizeStripeEvent({ ...event, id: 'evt_archived_catalogue', created: 103 }, stripe);
+    assert.equal(await billing.hasWorkspaceAccess(first), true, 'archiving a price/product must not terminate an existing paid subscription');
+    currentSubscription.items.data[0].price = structuredClone(monthlyPrice);
     currentSubscription.items.data[0].quantity = 2;
-    await service.synchronizeStripeEvent({ ...event, id: 'evt_quantity', created: 103 }, stripe);
+    await service.synchronizeStripeEvent({ ...event, id: 'evt_quantity', created: 104 }, stripe);
     assert.equal(await billing.hasWorkspaceAccess(first), false);
     currentSubscription.items.data[0].quantity = 1;
     currentSubscription.status = 'canceled';
-    await service.synchronizeStripeEvent({ ...event, id: 'evt_canceled', created: 104 }, stripe);
+    await service.synchronizeStripeEvent({ ...event, id: 'evt_canceled', created: 105 }, stripe);
     await service.synchronizeStripeEvent({ ...event, id: 'evt_old', created: 101 }, stripe);
     assert.equal(await billing.hasWorkspaceAccess(first), false);
 

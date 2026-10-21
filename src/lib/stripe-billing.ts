@@ -8,13 +8,13 @@ import { BillingError, billingConfiguration, stripeClient } from '@/lib/stripe';
 const APPLICATION = 'la-redaction';
 type CheckoutAttempt = { key: string; expiresAt: number; configuration?: string; sessionId?: string; url?: string };
 
-function isMonthlyPrice(price: Stripe.Price, mode: string): boolean {
+function isMonthlyPrice(price: Stripe.Price, mode: string, requireActive = true): boolean {
   const product = price.product;
-  return price.active && price.livemode === (mode === 'live') && price.currency === 'eur'
+  return (!requireActive || price.active) && price.livemode === (mode === 'live') && price.currency === 'eur'
     && price.unit_amount === 590 && price.type === 'recurring' && price.billing_scheme === 'per_unit'
     && price.recurring?.interval === 'month' && price.recurring.interval_count === 1
     && price.recurring.usage_type === 'licensed' && price.tax_behavior === 'inclusive'
-    && typeof product !== 'string' && !product.deleted && product.active
+    && typeof product !== 'string' && !product.deleted && (!requireActive || product.active)
     && product.metadata.application === APPLICATION;
 }
 
@@ -138,7 +138,7 @@ export async function synchronizeStripeEvent(event: Stripe.Event, stripe = strip
   const item = subscription.items.data[0];
   const eligible = subscription.livemode === (config.mode === 'live') && !subscription.items.has_more
     && subscription.items.data.length === 1 && item?.quantity === 1
-    && item.price.id === config.price && isMonthlyPrice(item.price, config.mode)
+    && item.price.id === config.price && isMonthlyPrice(item.price, config.mode, false)
     && subscription.automatic_tax?.enabled === false;
   const periodEnd = Math.max(0, ...subscription.items.data.map(item => item.current_period_end || 0));
   await inDurableTransaction(async () => {

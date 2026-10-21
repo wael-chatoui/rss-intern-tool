@@ -45,9 +45,22 @@ async function worker() {
     assert.equal((await database.getDb()).readArticleIds.length, 24);
     assert.deepEqual(await fs.readdir(process.env.RSS_DATA_DIR).catch(() => []), []);
   } else if (mode === 'missing') {
-    delete process.env.TURSO_DATABASE_URL;
-    process.env.VERCEL = '1';
-    assert.throws(() => store.usesDurableStorage(), /stockage durable/);
+    const flags = ['VERCEL', 'NETLIFY', 'CF_PAGES', 'AWS_LAMBDA_FUNCTION_NAME', 'REQUIRE_DURABLE_STORAGE', 'NODE_ENV'];
+    for (const [flag, value] of [['VERCEL', '1'], ['NETLIFY', 'true'], ['CF_PAGES', '1'], ['AWS_LAMBDA_FUNCTION_NAME', 'isolated-test'], ['REQUIRE_DURABLE_STORAGE', '1'], ['NODE_ENV', 'production']]) {
+      for (const key of flags) delete process.env[key];
+      delete process.env.RSS_DATA_DIR;
+      process.env[flag] = value;
+      delete process.env.TURSO_DATABASE_URL;
+      assert.throws(() => store.usesDurableStorage(), /stockage durable/, `${flag} without database`);
+      await assert.rejects(store.readDurableDocument('must-not-use-files'), /stockage durable/);
+      process.env.TURSO_DATABASE_URL = 'file:must-not-be-created.sqlite';
+      assert.throws(() => store.usesDurableStorage(), /stockage durable/, `${flag} with local SQLite`);
+      process.env.TURSO_DATABASE_URL = 'libsql://isolated-example.invalid';
+      delete process.env.TURSO_AUTH_TOKEN;
+      assert.throws(() => store.usesDurableStorage(), /stockage durable/, `${flag} without remote authentication`);
+      process.env.TURSO_AUTH_TOKEN = 'isolated-not-a-real-token';
+      assert.equal(store.usesDurableStorage(), true);
+    }
   } else if (mode === 'members') {
     const first = await auth.registerMember({ email: 'a@example.test', name: 'Rédaction A', password: 'phrase de test du premier compte' });
     const second = await auth.registerMember({ email: 'b@example.test', name: 'Rédaction B', password: 'phrase de test du second compte' });

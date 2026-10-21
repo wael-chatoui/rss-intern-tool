@@ -7,7 +7,7 @@ const { spawn } = require('node:child_process');
 async function main() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'redaction-http-'));
   const origin = 'http://localhost:3206';
-  Object.assign(process.env, { TURSO_DATABASE_URL: `file:${path.join(directory, 'http.sqlite')}`, TURSO_AUTH_TOKEN: '', VERCEL: '', AUTH_ORIGIN: origin, APP_BASE_URL: origin, PUBLIC_SIGNUP_ENABLED: '1', BILLING_ENABLED: '0' });
+  Object.assign(process.env, { TURSO_DATABASE_URL: `file:${path.join(directory, 'http.sqlite')}`, TURSO_AUTH_TOKEN: '', RSS_DATA_DIR: path.join(directory, 'isolated-test-data'), VERCEL: '', AUTH_ORIGIN: origin, APP_BASE_URL: origin, PUBLIC_SIGNUP_ENABLED: '1', BILLING_ENABLED: '0' });
   const load = require('./load-typescript.cjs')();
   const auth = load('src/lib/auth-store.ts'); const durable = load('src/lib/durable-store.ts'); const billing = load('src/lib/billing-store.ts');
   const noteModel = load('src/lib/note-model.ts');

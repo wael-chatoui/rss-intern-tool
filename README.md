@@ -37,6 +37,8 @@ Pour réinitialiser le mot de passe, arrêtez le serveur puis exécutez `npm run
 
 ```sh
 npm run build
+# Usage personnel local : nommer explicitement le répertoire persistant.
+export RSS_DATA_DIR="$PWD/data"
 npm run start
 ```
 
@@ -44,7 +46,7 @@ Vérification TypeScript : `npx tsc --noEmit --incremental false`.
 
 ## Technique et données
 
-Next.js 15.5.28, React 18, TypeScript, Tailwind CSS, Lucide et rss-parser. Sur Vercel, les sources, notes, articles, sessions et sauvegardes utilisent une base libSQL/Turso durable. Les mutations utilisent une transaction d’écriture, y compris entre plusieurs instances serveur. Sans configuration distante, un usage personnel local reste possible avec `data/db.json` et un seul processus Node. Sur Vercel, l’absence de base durable provoque une erreur explicite, sans repli éphémère.
+Next.js 15.5.28, React 18, TypeScript, Tailwind CSS, Lucide et rss-parser. Sur Vercel, les sources, notes, articles, sessions et sauvegardes utilisent une base libSQL/Turso durable. Les mutations utilisent une transaction d’écriture, y compris entre plusieurs instances serveur. Sans configuration distante, un usage personnel local reste possible avec `data/db.json` et un seul processus Node. En production, il exige un `RSS_DATA_DIR` persistant explicitement choisi. Sur Vercel, Netlify, Cloudflare Pages et AWS Lambda, l’absence de base distante authentifiée ou une URL SQLite locale provoque une erreur explicite. `REQUIRE_DURABLE_STORAGE=1` impose la même garde sur tout autre hôte, sans repli éphémère.
 
 Le cache RSS dure dix minutes. Le dernier contenu disponible s’affiche immédiatement, puis la collecte se poursuit en arrière-plan si nécessaire. La santé de chaque source est conservée après rechargement. Les collectes ciblées gardent les articles et diagnostics des autres sources. Une source indisponible conserve ses derniers articles et affiche un avertissement lors de l’actualisation. Les identifiants d’articles sont stables et distincts par source et lien ; les anciens identifiants sont migrés automatiquement. Le lecteur reconstruit les paragraphes, listes et liens HTTP(S) du flux, sans insérer son HTML brut. Le lien vers l’original reste visible dès le début de la lecture.
 
@@ -90,6 +92,8 @@ Les inscriptions sont fermées par défaut (`PUBLIC_SIGNUP_ENABLED=0`). Le paiem
 
 L’accès en écriture et la collecte RSS nécessitent un abonnement actif confirmé côté serveur. La consultation des notes, des articles enregistrés et l’export complet restent disponibles après résiliation, depuis `/espace` et `/compte`. Le retour d’un paiement ne donne aucun droit : seul un webhook signé, cohérent avec le compte, le produit et le mode configurés met à jour l’abonnement. Les événements rejoués ou anciens sont traités sans doublon.
 
+L’archivage d’un prix ou de son produit bloque les nouveaux achats, mais conserve les droits d’un abonnement existant valide. Il ne remplace pas une résiliation Stripe.
+
 Les mots de passe sont dérivés avec scrypt et un sel aléatoire. Les sessions sont opaques, stockées sous forme de condensats SHA-256, expirent après sept jours et sont révoquées à la déconnexion. Le cookie est HttpOnly, SameSite=Lax et Secure en production. Les mutations vérifient l’origine exacte. Le compteur des échecs de connexion persiste, ainsi que la limitation des inscriptions. Les données d’authentification ne figurent jamais dans les exports éditoriaux.
 
 L’installation propriétaire sur serveur utilise un lien privé `/activation#token=…`, avec un jeton aléatoire de 32 octets. Seul son SHA-256 est configuré dans `AUTH_SETUP_TOKEN_SHA256`, accompagné de `AUTH_SETUP_EXPIRES_AT`. Le fragment ne part pas dans la requête HTTP et est retiré de l’URL dès ouverture. La création du compte consomme atomiquement la possibilité d’installation ; le lien ne peut pas remplacer un compte existant. Le propriétaire choisit lui-même son mot de passe dans le formulaire. `OWNER_RESERVED_EMAIL` peut réserver son adresse avant l’ouverture des inscriptions.
@@ -108,14 +112,14 @@ Le compte et les sauvegardes locales sont également transférés s’ils existe
 
 ## Hébergement portable
 
-`output: standalone` et le `Dockerfile` permettent un hébergement Node 22 hors Vercel, avec le même stockage Turso. Le conteneur s’exécute sans privilèges root et les fichiers d’environnement et de données sont exclus de l’image. Aucun abonnement d’hébergement payant n’est requis par le code. Vérifiez les conditions commerciales de l’offre d’hébergement avant d’ouvrir les ventes.
+`output: standalone` et le `Dockerfile` permettent un hébergement Node 22 hors Vercel, avec le même stockage Turso. Le conteneur s’exécute sans privilèges root et les fichiers d’environnement et de données sont exclus de l’image. Il impose `REQUIRE_DURABLE_STORAGE=1` par défaut. Aucun abonnement d’hébergement payant n’est requis par le code. Vérifiez les conditions commerciales de l’offre d’hébergement avant d’ouvrir les ventes.
 
 ```sh
 docker build -t la-redaction .
 docker run --rm -p 3000:3000 --env-file /chemin/prive/production.env la-redaction
 ```
 
-Le stockage JSON local demande un volume inscriptible, privé et un seul processus. Les inscriptions multi-utilisateurs nécessitent le stockage durable.
+Le stockage JSON personnel local demande un volume inscriptible, privé et un seul processus. Dans un conteneur personnel avec un volume réellement monté, cette option exige aussi `REQUIRE_DURABLE_STORAGE=0` et un `RSS_DATA_DIR` pointant vers ce volume. Les inscriptions multi-utilisateurs nécessitent le stockage durable.
 
 ## Vérification
 

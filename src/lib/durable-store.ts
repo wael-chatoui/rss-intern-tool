@@ -11,16 +11,24 @@ export class DurableStorageError extends Error {
   constructor() { super('Le stockage durable est indisponible. Réessayez.'); this.name = 'DurableStorageError'; }
 }
 
+function requiresRemoteStorage(): boolean {
+  // Personal production hosting must explicitly name its persistent data path.
+  // Known serverless runtimes can never opt into a local filesystem fallback.
+  return process.env.VERCEL === '1' || process.env.NETLIFY === 'true' || process.env.CF_PAGES === '1'
+    || !!process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.REQUIRE_DURABLE_STORAGE === '1'
+    || (process.env.NODE_ENV === 'production' && !process.env.RSS_DATA_DIR);
+}
+
 export function usesDurableStorage(): boolean {
   const configured = !!process.env.TURSO_DATABASE_URL;
-  if (!configured && process.env.VERCEL === '1') throw new DurableStorageError();
+  if (requiresRemoteStorage() && (!configured || !process.env.TURSO_DATABASE_URL?.startsWith('libsql://') || !process.env.TURSO_AUTH_TOKEN)) throw new DurableStorageError();
   return configured;
 }
 
 function getClient(): Client {
+  const url = process.env.TURSO_DATABASE_URL;
+  if (!url || (requiresRemoteStorage() && (!url.startsWith('libsql://') || !process.env.TURSO_AUTH_TOKEN))) throw new DurableStorageError();
   if (!client) {
-    const url = process.env.TURSO_DATABASE_URL;
-    if (!url || (process.env.VERCEL === '1' && (!url.startsWith('libsql://') || !process.env.TURSO_AUTH_TOKEN))) throw new DurableStorageError();
     client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
   }
   return client;
