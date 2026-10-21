@@ -3,6 +3,7 @@ import path from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { DATA_DIR, getDb, updateDb } from '@/lib/db';
 import { createArticleId } from '@/lib/rss';
+import { getNoteSources, nextNoteRevision, noteRevision, rememberNoteRevision, validateNoteSources, NoteValidationError, withNoteSources } from '@/lib/note-model';
 import type { TransferData } from '@/lib/transfer-formats';
 import type { DatabaseSchema, FeedSource, RSSArticle, SocialPost } from '@/types';
 
@@ -10,7 +11,7 @@ export const MAX_TRANSFER_BYTES = 20 * 1024 * 1024;
 export const MAX_TRANSFER_RECORDS = 10_000;
 const BACKUP_DIRECTORY = path.join(DATA_DIR, 'backups');
 const BACKUP_NAME = /^auto-(\d{13})-[a-f0-9-]{36}\.json$/;
-const CATEGORIES = ['all', 'haute-couture', 'business', 'streetwear', 'trends', 'sustainability'] as const;
+const CATEGORIES = ['all', 'general', 'haute-couture', 'business', 'streetwear', 'trends', 'sustainability'] as const;
 const PLATFORMS = ['tiktok', 'instagram', 'linkedin'] as const;
 const STATUSES = ['idea', 'in_progress', 'ready', 'published'] as const;
 
@@ -125,7 +126,7 @@ function feed(value: unknown, location: string): FeedSource {
   return defined({
     id: string(item.id, `${location}.id`, 200, `feed_${hash(canonicalUrl(feedUrl)).slice(0, 24)}`),
     name, url: feedUrl,
-    category: enumeration(item.category, CATEGORIES, `${location}.category`, 'trends'),
+    category: enumeration(item.category, CATEGORIES, `${location}.category`, 'general'),
     language: enumeration(item.language, ['fr', 'en'], `${location}.language`, 'fr'),
     website: url(item.website, `${location}.website`, feedUrl),
     enabled: boolean(item.enabled, `${location}.enabled`, true)!,
@@ -133,11 +134,11 @@ function feed(value: unknown, location: string): FeedSource {
   });
 }
 function postFingerprint(item: SocialPost): string {
-  return hash(JSON.stringify([item.angle, item.notes || '', item.sourceArticleLink || '', item.tags, item.content]));
+  return hash(JSON.stringify([item.angle, item.notes || '', getNoteSources(item).map(source => [source.link, source.title, source.feed, source.excerpt || '']), item.tags, item.content]));
 }
 function post(value: unknown, location: string, exportedAt: string): SocialPost {
   const item = object(value, location);
-  fields(item, ['id', 'notes', 'articleId', 'sourceArticleTitle', 'sourceArticleLink', 'sourceArticleFeed', 'angle', 'tags', 'status', 'scheduledDate', 'scheduledTime', 'platforms', 'content', 'createdAt', 'updatedAt'], location);
+  fields(item, ['id', 'revision', 'notes', 'sources', 'articleId', 'sourceArticleTitle', 'sourceArticleLink', 'sourceArticleFeed', 'angle', 'tags', 'status', 'scheduledDate', 'scheduledTime', 'platforms', 'content', 'createdAt', 'updatedAt'], location);
   const content = object(item.content === undefined ? {} : item.content, `${location}.content`);
   fields(content, ['tiktok', 'instagram', 'linkedin'], `${location}.content`);
   const tiktok = object(content.tiktok === undefined ? {} : content.tiktok, `${location}.tiktok`);
@@ -146,9 +147,16 @@ function post(value: unknown, location: string, exportedAt: string): SocialPost 
   fields(tiktok, ['hook', 'script', 'visualNotes', 'durationEstimate'], `${location}.tiktok`);
   fields(instagram, ['caption', 'carouselSlides', 'hashtags'], `${location}.instagram`);
   fields(linkedin, ['title', 'body', 'keyTakeaways'], `${location}.linkedin`);
+  if (item.revision !== undefined && (!Number.isSafeInteger(item.revision) || (item.revision as number) < 0)) fail(location, 'révision invalide.');
+  let sources;
+  try { sources = validateNoteSources(item.sources); } catch (error) {
+    if (error instanceof NoteValidationError) fail(location, error.message);
+    throw error;
+  }
   const createdAt = date(item.createdAt, `${location}.createdAt`, exportedAt);
   const result: SocialPost = defined({
     id: string(item.id, `${location}.id`, 200, ''),
+    revision: item.revision as number | undefined, sources,
     notes: optionalString(item.notes, `${location}.notes`, 1_000_000),
     articleId: optionalString(item.articleId, `${location}.articleId`, 200),
     sourceArticleTitle: optionalString(item.sourceArticleTitle, `${location}.sourceArticleTitle`),
@@ -180,7 +188,7 @@ function article(value: unknown, location: string, exportedAt: string): RSSArtic
     id: string(item.id, `${location}.id`, 200, createArticleId(feedId, canonicalUrl(link))),
     feedId, feedName,
     feedLanguage: enumeration(item.feedLanguage, ['fr', 'en'], `${location}.feedLanguage`, 'fr'),
-    category: enumeration(item.category, CATEGORIES, `${location}.category`, 'trends'),
+    category: enumeration(item.category, CATEGORIES, `${location}.category`, 'general'),
     title: string(item.title, `${location}.title`, 2_000, 'Sans titre'), link,
     pubDate: date(item.pubDate, `${location}.pubDate`, exportedAt),
     author: optionalString(item.author, `${location}.author`, 500),
@@ -196,9 +204,15 @@ export function validateTransferData(value: unknown): TransferData {
   try { serialized = JSON.stringify(value); } catch { throw new TransferError('Le fichier ne contient pas des données JSON valides.'); }
   if (!serialized || Buffer.byteLength(serialized, 'utf8') > MAX_TRANSFER_BYTES) throw new TransferError('Le fichier dépasse la limite de 20 Mo.', 413);
   const item = object(value, 'Fichier');
-  fields(item, ['version', 'kind', 'exportedAt', 'feeds', 'posts', 'savedArticles', 'cachedArticles', 'readArticleIds', 'lastFetchedAt'], 'Fichier');
+  fields(item, ['version', 'kind', 'exportedAt', 'feeds', 'posts', 'savedArticles', 'cachedArticles', 'readArticleIds', 'lastFetchedAt', 'noteRevisions'], 'Fichier');
   if (item.version !== 1) fail('Fichier', 'version non prise en charge.');
   const kind = enumeration(item.kind, ['backup', 'notes', 'feeds', 'articles'], 'Fichier.kind');
+  if (item.noteRevisions !== undefined) {
+    if (kind !== 'backup') fail('Fichier.noteRevisions', 'ce champ interne est accepté uniquement dans une sauvegarde brute.');
+    const journal = object(item.noteRevisions, 'Fichier.noteRevisions');
+    for (const revision of Object.values(journal)) if (!Number.isSafeInteger(revision) || (revision as number) < 0) fail('Fichier.noteRevisions', 'révision invalide.');
+    // Deliberately discard imported counters: only this server's history is authoritative.
+  }
   const exportedAt = date(item.exportedAt, 'Fichier.exportedAt');
   const data: TransferData = { version: 1, kind, exportedAt };
   let count = 0;
@@ -263,6 +277,8 @@ function importPlan(database: DatabaseSchema, rawData: unknown, mode: ImportMode
     }
   }
   const next = structuredClone(database);
+  // Preserve tombstones for every current note before a complete restore can remove it.
+  for (const post of database.posts) rememberNoteRevision(next, post.id, noteRevision(post));
   if (mode === 'replace') {
     next.feeds = []; next.posts = []; next.savedArticles = [];
     // Older backups may omit the cache or read history. Keep those metadata intact.
@@ -376,27 +392,49 @@ function importPlan(database: DatabaseSchema, rawData: unknown, mode: ImportMode
 
   const allArticles = [...next.savedArticles, ...(next.cachedArticles || [])];
   if (data.posts) data.posts = data.posts.map(incoming => {
-    let normalized = { ...incoming };
-    const references = incoming.articleId ? articleIds.get(incoming.articleId) : undefined;
-    if (references?.size === 1) normalized.articleId = Array.from(references)[0];
-    if (incoming.sourceArticleLink) {
-      const matches = allArticles.filter(item => canonicalUrl(item.link) === canonicalUrl(incoming.sourceArticleLink!) && (!incoming.sourceArticleFeed || item.feedName === incoming.sourceArticleFeed));
-      const ids = new Set(matches.map(item => item.id));
-      if (ids.size === 1) normalized.articleId = Array.from(ids)[0];
-      else if (references && references.size > 1) warnings.push(`« ${incoming.angle} » : lien vers l’article ambigu, référence d’origine conservée.`);
-    } else if (references && references.size > 1) warnings.push(`« ${incoming.angle} » : référence d’article ambiguë, identifiant d’origine conservé.`);
+    const remapSource = (source: import('@/types').NoteSource) => {
+      const normalized = { ...source };
+      const references = source.articleId ? articleIds.get(source.articleId) : undefined;
+      if (references?.size === 1) normalized.articleId = Array.from(references)[0];
+      if (source.link) {
+        const matches = allArticles.filter(item => canonicalUrl(item.link) === canonicalUrl(source.link) && (!source.feed || item.feedName === source.feed));
+        const ids = new Set(matches.map(item => item.id));
+        if (ids.size === 1) normalized.articleId = Array.from(ids)[0];
+        else if (references && references.size > 1) warnings.push(`« ${incoming.angle} » : lien vers l’article ambigu, référence d’origine conservée.`);
+      } else if (references && references.size > 1) warnings.push(`« ${incoming.angle} » : référence d’article ambiguë, identifiant d’origine conservé.`);
+      return normalized;
+    };
+    let normalized = incoming.sources !== undefined
+      ? withNoteSources(incoming, getNoteSources(incoming).map(remapSource))
+      : { ...incoming, articleId: remapSource(getNoteSources(incoming)[0] || { title: '', link: '', feed: '' }).articleId };
     const fingerprint = postFingerprint(normalized);
     const index = next.posts.findIndex(item => item.id === normalized.id || (mode === 'merge' && postFingerprint(item) === fingerprint));
     const existing = index < 0 ? undefined : next.posts[index];
     const action = existing ? duplicates === 'update' ? 'update' : 'skip' : 'add';
     if (existing) {
       normalized = { ...normalized, id: existing.id };
-      if (action === 'update') next.posts[index] = { ...existing, ...normalized };
-    } else next.posts.push(normalized);
+      if (action === 'update') {
+        normalized.revision = nextNoteRevision(next, normalized.id, existing);
+        next.posts[index] = { ...existing, ...normalized };
+      }
+    } else {
+      // Revisions are local concurrency tokens, never restored from another file.
+      const previous = database.posts.find(post => post.id === normalized.id);
+      normalized.revision = nextNoteRevision(next, normalized.id, previous);
+      next.posts.push(normalized);
+    }
     record('posts', normalized.id, normalized.angle, action);
     return normalized;
   });
   next.posts = next.posts.map(item => {
+    if (item.sources !== undefined) {
+      const sources = item.sources.map(source => {
+        const references = source.articleId ? articleIds.get(source.articleId) : undefined;
+        if (references?.size === 1) return { ...source, articleId: Array.from(references)[0] };
+        return source;
+      });
+      item = withNoteSources(item, sources);
+    }
     if (!item.articleId) return item;
     const references = articleIds.get(item.articleId);
     if (references?.size === 1) return { ...item, articleId: Array.from(references)[0] };

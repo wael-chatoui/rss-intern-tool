@@ -4,11 +4,15 @@ Un espace de veille RSS, de notes sourcées et de rédaction pour construire une
 
 ## Utilisation
 
-- **Veille RSS** : lecture en magazine ou en liste, recherche locale instantanée, filtres par source, langue et thématique, suivi lu/non lu.
+- **Veille RSS** : lecture en magazine ou en liste, recherche locale dans le texte intégral (accents ignorés), filtres par source, langue et thématique, suivi lu/non lu et parcours « Lu et suivant » dans l’ordre de la sélection.
 - **Enregistrés** : sélection persistante, y compris les articles qui ne sont plus dans le cache RSS.
-- **Notes & rédaction** : notes libres ou créées depuis un article avec son lien source. Enregistrement automatique, statuts, mots-clés et export Markdown. Les contenus TikTok, Instagram et LinkedIn existants restent accessibles dans les onglets du carnet.
-- **Planning éditorial** : tableau de préparation et calendrier. Un sujet peut être créé à la date sélectionnée. Le planning organise le travail ; il n’exécute pas de publication sur les réseaux.
-- **Mes sources** : ajout d’un flux RSS après vérification, activation, pause, recherche et retrait avec confirmation.
+- **Notes & rédaction** : notes libres ou créées depuis un article, avec plusieurs références par sujet. Un article peut rejoindre une note existante. Les extraits sources restent séparés de « Mon angle » et « Mes notes ». Enregistrement automatique, statuts, mots-clés et exports. Les contenus TikTok, Instagram et LinkedIn existants restent accessibles dans les onglets du carnet.
+- **Planning éditorial** : tableau de préparation et calendrier. Un sujet peut être créé à la date sélectionnée. Un bac « À planifier » permet d’affecter les sujets existants à la date sélectionnée. Le planning organise le travail ; il n’exécute pas de publication sur les réseaux.
+- **Mes sources** : ajout à partir d’une URL de site ou de flux, détection des doublons, activation, pause et retrait avec confirmation. Chaque source affiche sa dernière réussite et son éventuelle erreur, avec une relance ciblée.
+
+La section, les filtres, le mode de lecture et la note ou l’article ouvert disposent d’une URL. La veille et la sélection gardent chacune leur contexte et leur position de retour. Après une note, « Revenir à ma veille » reprend ce contexte.
+
+Les notes sont versionnées : un ancien onglet ne peut pas écraser une modification plus récente. L’éditeur présente les deux versions et permet de conserver son travail dans une nouvelle note. Les brouillons en attente sont copiés sur cet appareil, séparément par compte et onglet ; après rechargement, l’encart « Copies locales » permet de les reprendre ou de les télécharger. L’application signale aussi un stockage local plein et conserve le brouillon ouvert.
 
 Le raccourci `⌘ K` ou `Ctrl K` ouvre la recherche dans la veille. Les sources de mode déjà présentes sont conservées et de nouvelles sources peuvent être ajoutées.
 
@@ -42,7 +46,7 @@ Vérification TypeScript : `npx tsc --noEmit --incremental false`.
 
 Next.js 14, React 18, TypeScript, Tailwind CSS, Lucide et rss-parser. L’application stocke les sources, notes, articles sélectionnés et cache dans `data/db.json`. Les écritures sont atomiques et les mutations sont sérialisées dans le processus serveur. Ce stockage est conçu pour un usage personnel local avec un seul processus serveur.
 
-Le cache RSS dure dix minutes. Une source indisponible conserve ses derniers articles et affiche un avertissement lors de l’actualisation. Les identifiants d’articles sont stables et distincts par source et lien ; les anciens identifiants sont migrés automatiquement. Les contenus RSS sont affichés comme texte sûr dans le lecteur.
+Le cache RSS dure dix minutes. Le dernier contenu disponible s’affiche immédiatement, puis la collecte se poursuit en arrière-plan si nécessaire. La santé de chaque source est conservée après rechargement. Les collectes ciblées gardent les articles et diagnostics des autres sources. Une source indisponible conserve ses derniers articles et affiche un avertissement lors de l’actualisation. Les identifiants d’articles sont stables et distincts par source et lien ; les anciens identifiants sont migrés automatiquement. Le lecteur reconstruit les paragraphes, listes et liens HTTP(S) du flux, sans insérer son HTML brut. Le lien vers l’original reste visible dès le début de la lecture.
 
 Sur un hébergement en lecture seule comme Vercel, le cache RSS utilise la mémoire du processus si son écriture est refusée. Les articles restent consultables. Ce cache temporaire est reconstruit à la demande et ne constitue pas un stockage durable. Cette solution concerne uniquement le cache RSS : un stockage persistant reste nécessaire pour enregistrer durablement les notes et les préférences sur un hébergement serveur. Les anciennes adresses intégrées ELLE, FashionNetwork, Madame Figaro et Dazed sont migrées vers les flux officiels vérifiés. Dazed couvre désormais la mode et la culture. Les erreurs HTTP, délais et réponses invalides sont signalés par source.
 
@@ -73,7 +77,7 @@ Limites : 20 Mo par fichier et par requête d’import, 10 000 enregistrements p
 
 L’application nécessite Node.js 22.13 ou ultérieur. Le worker PDF est copié localement par `predev` et `prebuild` ; aucun service de conversion externe n’est utilisé. `RSS_DATA_DIR` permet de définir un autre répertoire de données, notamment pour les tests.
 
-Vérification : `npm test`, puis `npm run build`. Les tests de transfert utilisent une base temporaire et ne modifient pas `data/db.json`.
+Vérification : `npm test` (notes versionnées, brouillons, parcours d’écriture, navigation, recherche et transferts), `npm run test:rss`, `npm run test:auth`, puis `npm run build`. Les tests de transfert utilisent une base temporaire et ne modifient pas `data/db.json`.
 
 
 ## Authentification et hébergement

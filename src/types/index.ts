@@ -1,5 +1,6 @@
 export type FashionCategory = 
   | 'all'
+  | 'general'
   | 'haute-couture'
   | 'business'
   | 'streetwear'
@@ -63,7 +64,10 @@ export interface SocialContent {
 
 export interface SocialPost {
   id: string;
+  /** Server revision. Notes created before versioning start at zero. */
+  revision?: number;
   notes?: string;
+  sources?: NoteSource[];
   articleId?: string;
   sourceArticleTitle?: string;
   sourceArticleLink?: string;
@@ -79,6 +83,22 @@ export interface SocialPost {
   updatedAt: string;
 }
 
+export interface NoteSource {
+  articleId?: string;
+  title: string;
+  link: string;
+  feed: string;
+  excerpt?: string;
+}
+
+export interface FeedHealth {
+  feedId: string;
+  status: 'ok' | 'error' | 'never';
+  lastAttemptAt?: string;
+  lastSuccessAt?: string;
+  error?: string;
+}
+
 export interface DatabaseSchema {
   feeds: FeedSource[];
   savedArticles: RSSArticle[];
@@ -86,4 +106,7 @@ export interface DatabaseSchema {
   posts: SocialPost[];
   cachedArticles?: RSSArticle[];
   lastFetchedAt?: string;
+  feedHealth?: FeedHealth[];
+  /** Server-only revision history, retained even when a note is deleted or restored. */
+  noteRevisions?: Record<string, number>;
 }

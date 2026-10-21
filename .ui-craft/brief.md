@@ -33,3 +33,10 @@ Import / export : choix du contenu, du format et de la sélection. L’import pr
 - 2026-10-15 : ajout demandé d’une landing et d’une authentification. Un seul compte propriétaire e-mail/mot de passe protège l’espace existant.
 - Charte existante conservée : papier, vert forêt, Newsreader et DM Sans. Landing factuelle à hero asymétrique, variance 7, signature : capture réelle recadrée du produit avec données de démonstration. Aucun tarif ni témoignage inventé.
 - Connexion à deux panneaux, variance 4. Signature : accueil lié au métier, « Retrouvez vos sources et vos notes ». Étiquettes visibles, erreurs accessibles, affichage du mot de passe, session de sept jours et déconnexion.
+
+
+## Continuité et fiabilité du travail éditorial
+- 2026-10-19 : priorité UX confirmée. Sauvegardes versionnées, conflits explicites, copies locales récupérables et erreurs propres à chaque collection.
+- Veille et sélection conservent leur recherche, leurs filtres et leur position. Sections, notes et lecteur ont une URL ; le retour navigateur suit le parcours.
+- Un sujet rassemble plusieurs références. Les extraits importés restent séparés de l’angle et du texte de l’auteur. Le lecteur permet « Lu et suivant » et l’ajout à un sujet existant.
+- Recherche dans le texte intégral et les déclinaisons sociales, sources avec diagnostic persistant, calendrier avec bac « À planifier ». Le cache se lit avant la collecte distante.

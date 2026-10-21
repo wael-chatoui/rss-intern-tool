@@ -1,3 +1,4 @@
+import { getNoteSources } from '@/lib/note-model';
 import type { TransferData, TransferTarget } from './transfer-formats';
 import type { PDFFont, PDFPage } from 'pdf-lib';
 
@@ -160,7 +161,7 @@ export async function createTransferPdf(data: TransferData, target: TransferTarg
       paragraph(post.angle || 'Note sans titre', 21, 'bold', ink, 10);
       paragraph([labels[post.status], post.scheduledDate ? `Publication : ${post.scheduledDate}${post.scheduledTime ? ` ${post.scheduledTime}` : ''}` : '', post.tags?.length ? `Mots-clés : ${post.tags.join(', ')}` : ''].filter(Boolean).join(' | '), 8, 'normal', muted, 15);
       paragraph(post.notes || '', 10.5);
-      if (post.sourceArticleTitle || post.sourceArticleLink) section('Source', [post.sourceArticleTitle, post.sourceArticleFeed, post.sourceArticleLink].filter(Boolean).join('\n'));
+      getNoteSources(post).forEach((source, index) => section(`Source ${index + 1}`, [source.title, source.feed, source.link, source.excerpt].filter(Boolean).join('\n')));
       const tik = post.content?.tiktok;
       if (tik && (tik.hook || tik.script || tik.visualNotes)) {
         section('TikTok / Accroche', tik.hook); section('TikTok / Script', tik.script); section('TikTok / Mise en images', tik.visualNotes);

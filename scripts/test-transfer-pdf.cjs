@@ -4,10 +4,15 @@ const path = require('node:path');
 const Module = require('node:module');
 const ts = require('typescript');
 const { PDFDocument } = require('pdf-lib');
+const noteFilename = path.resolve(__dirname, '../src/lib/note-model.ts');
+const noteCompiled = ts.transpileModule(fs.readFileSync(noteFilename, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS } }).outputText;
+const noteModule = new Module(noteFilename, module); noteModule.filename = noteFilename; noteModule._compile(noteCompiled, noteFilename);
+
 const filename = path.resolve(__dirname, '../src/lib/transfer-pdf.ts');
 const compiled = ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
 const mod = new Module(filename, module);
-mod.filename = filename; mod.paths = Module._nodeModulePaths(path.dirname(filename)); mod._compile(compiled, filename);
+mod.filename = filename; mod.paths = Module._nodeModulePaths(path.dirname(filename)); mod.require = function (name) { return name === '@/lib/note-model' ? noteModule.exports : Module.prototype.require.call(this, name); };
+mod._compile(compiled, filename);
 const nativeFetch = global.fetch;
 global.fetch = async input => {
   if (typeof input === 'string' && input.startsWith('/fonts/')) return new Response(fs.readFileSync(path.resolve(__dirname, '../public', input.slice(1))));
@@ -16,6 +21,7 @@ global.fetch = async input => {
 (async () => {
   const content={tiktok:{hook:'',script:'',visualNotes:'',durationEstimate:''},instagram:{caption:'',carouselSlides:[],hashtags:[]},linkedin:{title:'',body:'',keyTakeaways:[]}};
   const note={id:'pdf-qa',angle:'Enquête : rédaction indépendante',notes:Array(90).fill('Paragraphe de contrôle avec accents : é è à ç œ, « citation », emoji 👀 et caractères grecs αβ.').join('\n\n'),tags:['enquête'],status:'in_progress',platforms:[],content,sourceArticleTitle:'Source vérifiée',sourceArticleLink:'https://example.org/'+('chemin-long-'.repeat(18)),createdAt:'2026-10-15T10:00:00Z',updatedAt:'2026-10-15T10:00:00Z'};
+  note.sources = [{ title: note.sourceArticleTitle, link: note.sourceArticleLink, feed: 'Premier journal' }, { title: 'Deuxième source recoupée', link: 'https://second.example/article', feed: 'Second journal', excerpt: 'Un fait recoupé dans une deuxième source.' }];
   const result=await mod.exports.createTransferPdf({version:1,kind:'notes',exportedAt:note.createdAt,posts:[note]},'notes');
   assert.equal(result.mime,'application/pdf'); assert.equal(Buffer.from(result.bytes).subarray(0,4).toString(),'%PDF');
   const document=await PDFDocument.load(result.bytes); assert.ok(document.getPageCount()>=3,'Long notes must paginate');

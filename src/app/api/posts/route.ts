@@ -1,115 +1,84 @@
 import { NextResponse } from 'next/server';
 import { protectApi } from '@/lib/auth';
 import { getDb, updateDb } from '@/lib/db';
-import { SocialPost } from '@/types';
-
-export async function GET(req: Request) {
-  const denied = await protectApi(req);
-  if (denied) return denied;
-  try {
-    const db = await getDb();
-    return NextResponse.json({ posts: db.posts || [] });
-  } catch (error) {
-    return NextResponse.json({ error: 'Erreur récupération posts' }, { status: 500 });
-  }
-}
+import { NoteValidationError, nextNoteRevision, noteRevision, rememberNoteRevision, validateNotePost } from '@/lib/note-model';
 
 export const dynamic = 'force-dynamic';
-
+const MAX_NOTE_BYTES = 8 * 1024 * 1024;
+async function bodyJson(req: Request): Promise<Record<string, unknown>> {
+  const reader = req.body?.getReader();
+  if (!reader) throw new NoteValidationError('Aucune note reçue.');
+  const chunks: Uint8Array[] = []; let size = 0;
+  while (true) {
+    const { done, value } = await reader.read(); if (done) break;
+    size += value.byteLength;
+    if (size > MAX_NOTE_BYTES) { await reader.cancel(); throw new NoteValidationError('La note dépasse la limite de 8 Mo.'); }
+    chunks.push(value);
+  }
+  let body: unknown;
+  try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new NoteValidationError('Le contenu JSON de la note est invalide.'); }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new NoteValidationError('La note doit être un objet.');
+  return body as Record<string, unknown>;
+}
+function failure(error: unknown, fallback: string) {
+  if (error instanceof NoteValidationError) return NextResponse.json({ error: error.message }, { status: 400 });
+  console.error(fallback, error);
+  return NextResponse.json({ error: fallback }, { status: 500 });
+}
+function conflict(post: ReturnType<typeof validateNotePost>) {
+  return NextResponse.json({ code: 'NOTE_CONFLICT', error: 'Cette note a été modifiée ailleurs. Comparez les versions avant de l’enregistrer.', post }, { status: 409 });
+}
+export async function GET(req: Request) {
+  const denied = await protectApi(req); if (denied) return denied;
+  try { return NextResponse.json({ posts: (await getDb()).posts || [] }, { headers: { 'Cache-Control': 'no-store' } }); }
+  catch (error) { return failure(error, 'Impossible de charger les notes. Réessayez.'); }
+}
 export async function POST(req: Request) {
-  const denied = await protectApi(req);
-  if (denied) return denied;
+  const denied = await protectApi(req); if (denied) return denied;
   try {
-    const body = await req.json();
-    const newPost: SocialPost = {
-      id: `post-${crypto.randomUUID()}`,
-      notes: typeof body.notes === 'string' ? body.notes : '',
-      articleId: body.articleId,
-      sourceArticleTitle: body.sourceArticleTitle || '',
-      sourceArticleLink: body.sourceArticleLink || '',
-      sourceArticleFeed: body.sourceArticleFeed || '',
-      angle: body.angle || 'Nouvel angle éditorial',
-      tags: body.tags || [],
-      status: body.status || 'idea',
-      scheduledDate: body.scheduledDate || undefined,
-      scheduledTime: body.scheduledTime || undefined,
-      platforms: body.platforms || ['tiktok', 'instagram', 'linkedin'],
-      content: {
-        tiktok: {
-          hook: body.content?.tiktok?.hook || '',
-          script: body.content?.tiktok?.script || '',
-          visualNotes: body.content?.tiktok?.visualNotes || '',
-          durationEstimate: body.content?.tiktok?.durationEstimate || '30s-45s',
-        },
-        instagram: {
-          caption: body.content?.instagram?.caption || '',
-          carouselSlides: body.content?.instagram?.carouselSlides || [],
-          hashtags: body.content?.instagram?.hashtags || [],
-        },
-        linkedin: {
-          title: body.content?.linkedin?.title || '',
-          body: body.content?.linkedin?.body || '',
-          keyTakeaways: body.content?.linkedin?.keyTakeaways || [],
-        },
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    await updateDb(db => {
-      if (!db.posts) db.posts = [];
-      db.posts.unshift(newPost);
-    });
-
-    return NextResponse.json({ post: newPost }, { status: 201 });
-  } catch (error) {
-    console.error('Error creating post:', error);
-    return NextResponse.json({ error: 'Erreur création post' }, { status: 500 });
-  }
+    const body = await bodyJson(req);
+    const now = new Date().toISOString();
+    const post = validateNotePost(body, { id: `post-${crypto.randomUUID()}`, now });
+    post.createdAt = now; post.updatedAt = now;
+    await updateDb(db => { post.revision = nextNoteRevision(db, post.id); db.posts.unshift(post); });
+    return NextResponse.json({ post }, { status: 201 });
+  } catch (error) { return failure(error, 'Impossible de créer la note. Réessayez.'); }
 }
-
 export async function PUT(req: Request) {
-  const denied = await protectApi(req);
-  if (denied) return denied;
+  const denied = await protectApi(req); if (denied) return denied;
   try {
-    const updatedPost: SocialPost = await req.json();
-    if (!updatedPost || !updatedPost.id) {
-      return NextResponse.json({ error: 'ID requis' }, { status: 400 });
-    }
-
-    const post = await updateDb(db => {
-      const index = (db.posts || []).findIndex(p => p.id === updatedPost.id);
-      if (index === -1) return null;
-      const savedPost = { ...updatedPost, updatedAt: new Date().toISOString() };
-      db.posts[index] = savedPost;
-      return savedPost;
+    const body = await bodyJson(req);
+    if (typeof body.id !== 'string' || !body.id) throw new NoteValidationError('Identifiant de note requis.');
+    validateNotePost(body, { requireRevision: true });
+    const result = await updateDb(db => {
+      const index = db.posts.findIndex(post => post.id === body.id);
+      if (index < 0) return { kind: 'missing' as const };
+      const current = db.posts[index];
+      if (body.revision !== noteRevision(current)) return { kind: 'conflict' as const, post: current };
+      const post = validateNotePost({ ...current, ...body }, { requireRevision: true });
+      post.createdAt = current.createdAt; post.updatedAt = new Date().toISOString(); post.revision = nextNoteRevision(db, post.id, current);
+      db.posts[index] = post;
+      return { kind: 'saved' as const, post };
     });
-    if (!post) {
-      return NextResponse.json({ error: 'Post non trouvé' }, { status: 404 });
-    }
-    return NextResponse.json({ post });
-  } catch (error) {
-    return NextResponse.json({ error: 'Erreur mise à jour post' }, { status: 500 });
-  }
+    if (result.kind === 'missing') return NextResponse.json({ error: 'Note introuvable.' }, { status: 404 });
+    if (result.kind === 'conflict') return conflict(result.post);
+    return NextResponse.json({ post: result.post });
+  } catch (error) { return failure(error, 'Impossible d’enregistrer la note. Vos modifications restent dans le brouillon.'); }
 }
-
 export async function DELETE(req: Request) {
-  const denied = await protectApi(req);
-  if (denied) return denied;
+  const denied = await protectApi(req); if (denied) return denied;
   try {
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get('id');
-
-    if (!id) {
-      return NextResponse.json({ error: 'ID requis' }, { status: 400 });
-    }
-
-    await updateDb(db => {
-      db.posts = (db.posts || []).filter(p => p.id !== id);
+    const params = new URL(req.url).searchParams;
+    const id = params.get('id'); const revisionText = params.get('revision');
+    if (!id) throw new NoteValidationError('Identifiant de note requis.');
+    if (revisionText !== null && (!/^\d+$/.test(revisionText) || !Number.isSafeInteger(Number(revisionText)))) throw new NoteValidationError('Révision de note invalide.');
+    const result = await updateDb(db => {
+      const current = db.posts.find(post => post.id === id);
+      if (current && revisionText !== null && Number(revisionText) !== noteRevision(current)) return current;
+      if (current) rememberNoteRevision(db, id, noteRevision(current));
+      db.posts = db.posts.filter(post => post.id !== id); return null;
     });
-
+    if (result) return conflict(result);
     return NextResponse.json({ success: true });
-  } catch (error) {
-    return NextResponse.json({ error: 'Erreur suppression post' }, { status: 500 });
-  }
+  } catch (error) { return failure(error, 'Impossible de supprimer la note. Réessayez.'); }
 }

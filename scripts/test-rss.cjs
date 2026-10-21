@@ -29,8 +29,10 @@ async function main() {
     requestHeaders.push(req.headers);
     if (req.url === '/403') { res.writeHead(403).end('Forbidden'); return; }
     if (req.url === '/404') { res.writeHead(404).end('Not found'); return; }
+    if (req.url === '/website') { res.writeHead(200, { 'Content-Type': 'text/html' }).end('<!doctype html><html><head><link REL="alternate" TYPE="application/atom+xml" href="/atom"></head></html>'); return; }
     if (req.url === '/html') { res.writeHead(200, { 'Content-Type': 'text/html' }).end('<!doctype html><html><body>Website</body></html>'); return; }
-    if (req.url === '/invalid') { res.writeHead(200, { 'Content-Type': 'text/xml' }).end('<rss version="2.0"><channel>'); return; }
+    if (req.url === '/discovery-many') { res.writeHead(200, { 'Content-Type': 'text/html' }).end('<html><head>' + [1,2,3,4].map(i => `<link rel="alternate" type="application/rss+xml" href="/invalid?${i}">`).join('') + '</head></html>'); return; }
+    if (req.url.startsWith('/invalid')) { res.writeHead(200, { 'Content-Type': 'text/xml' }).end('<rss version="2.0"><channel>'); return; }
     if (req.url === '/slow') { return; } // The client's timeout must abort this request.
     if (req.url === '/redirect') { res.writeHead(302, { Location: '/gzip' }).end(); return; }
     if (req.url === '/atom') { res.writeHead(200, { 'Content-Type': 'application/atom+xml' }).end(atomXml); return; }
@@ -80,20 +82,24 @@ async function main() {
     assert.match(aggregated.warnings[0], /Journal denied : HTTP 403/);
     assert.match(aggregated.warnings[1], /Journal empty : aucun article reçu/);
     const beforeEmpty = requests;
-    assert.equal(JSON.stringify(await rss.fetchAllActiveFeeds([])), JSON.stringify({ articles: [], failedFeedIds: [], warnings: [] }));
+    assert.equal(JSON.stringify(await rss.fetchAllActiveFeeds([])), JSON.stringify({ articles: [], failedFeedIds: [], warnings: [], health: [] }));
+    assert.equal(aggregated.health.find(item => item.feedId === 'ok').status, 'ok');
+    assert.match(aggregated.health.find(item => item.feedId === 'denied').error, /HTTP 403/);
+    assert.ok(aggregated.health.every(item => item.lastAttemptAt));
     assert.equal((await rss.fetchAllActiveFeeds([source('paused', '/403', false)])).warnings.length, 0);
     assert.equal(requests, beforeEmpty, 'empty or disabled sources must not make network requests');
     groups++;
 
     let storedFeed;
     let writes = 0;
+    const feedDatabase = { feeds: [] };
     class NextResponse extends Response {
       static json(value, init = {}) { return new NextResponse(JSON.stringify(value), { ...init, headers: { 'Content-Type': 'application/json' } }); }
     }
     const route = load('src/app/api/feeds/route.ts', {
       '@/lib/rss': rss, '@/lib/feed-catalog': catalog,
       '@/lib/auth': { protectApi: async () => null },
-      '@/lib/db': { updateDb: async mutate => { const db = { feeds: [] }; const result = await mutate(db); storedFeed = db.feeds[0]; writes++; return result; } },
+      '@/lib/db': { getDb: async () => structuredClone(feedDatabase), updateDb: async mutate => { const result = await mutate(feedDatabase); storedFeed = feedDatabase.feeds[0]; writes++; return result; } },
       'next/server': { NextResponse },
     });
     const addRequest = endpoint => new Request('http://localhost/api/feeds', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Test', url: `${base}${endpoint}` }) });
@@ -104,12 +110,37 @@ async function main() {
     assert.equal(response.status, 422);
     assert.match((await response.json()).error, /HTTP 403/);
     assert.equal(writes, 1, 'invalid sources must not be persisted');
+    const beforeDuplicate = requests;
+    response = await route.POST(addRequest('/gzip/#bookmark'));
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).error, /existe déjà/);
+    assert.equal(requests, beforeDuplicate, 'normalized duplicate URLs must be rejected before contacting the publisher');
+    assert.equal(writes, 1, 'duplicate sources must not be inserted');
+    assert.equal(rss.normalizeFeedUrl('HTTPS://Example.COM:443/rss/?z=2&a=1#part'), 'https://example.com/rss?a=1&z=2');
+    response = await route.POST(new Request('http://localhost/api/feeds', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: `${base}/website` }) }));
+    assert.equal(response.status, 201);
+    const discovered = await response.json();
+    assert.equal(discovered.feed.url, `${base}/atom`);
+    assert.equal(discovered.feed.name, 'Journal Atom');
+    assert.equal(discovered.feed.category, 'general');
+    assert.equal(discovered.feeds.length, 2);
+    response = await route.POST(addRequest('/website'));
+    assert.equal(response.status, 409, 'website discovery must detect an existing canonical feed');
+    assert.equal(feedDatabase.feeds.length, 2);
+    const race = await Promise.all([route.POST(addRequest('/race')), route.POST(addRequest('/race/'))]);
+    assert.deepEqual(race.map(item => item.status).sort(), [201, 409]);
+    assert.equal(feedDatabase.feeds.filter(feed => feed.url === `${base}/race`).length, 1, 'the transaction rechecks duplicates after concurrent verification');
     assert.ok(requestHeaders.every(headers => headers['user-agent'].includes('FashionPressHub/1.0')));
     assert.ok(requestHeaders.every(headers => headers.accept.includes('application/atom+xml')));
     groups++;
 
     assert.equal(catalog.resolveFeedUrl('https://www.dazeddigital.com/rss/fashion'), 'https://www.dazeddigital.com/rss');
     assert.equal(catalog.resolveFeedUrl('https://www.dazeddigital.com/rss/fashion?custom=1'), 'https://www.dazeddigital.com/rss/fashion?custom=1');
+    groups++;
+
+    const beforeDiscovery = requests;
+    await assert.rejects(rss.discoverFeed(`${base}/discovery-many`), /aucun des flux annoncés/);
+    assert.equal(requests - beforeDiscovery, 4, 'discovery reads one page and at most three advertised feeds');
     groups++;
 
     const capturedHeaders = [];

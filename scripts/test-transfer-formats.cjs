@@ -7,6 +7,10 @@ const Module = require('node:module');
 const { File } = require('node:buffer');
 const ts = require('typescript');
 const { zipSync, unzipSync } = require('fflate');
+const noteFilename = path.resolve(__dirname, '../src/lib/note-model.ts');
+const noteCompiled = ts.transpileModule(fs.readFileSync(noteFilename, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS } }).outputText;
+const noteModule = new Module(noteFilename, module); noteModule.filename = noteFilename; noteModule._compile(noteCompiled, noteFilename);
+
 
 const sourcePath = path.resolve(__dirname, '../src/lib/transfer-formats.ts');
 const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'rss-transfer-formats-'));
@@ -18,6 +22,7 @@ fs.writeFileSync(outputPath, output);
 const loaded = new Module(outputPath, module);
 loaded.filename = outputPath;
 loaded.paths = Module._nodeModulePaths(path.dirname(sourcePath));
+loaded.require = function (name) { return name === '@/lib/note-model' ? noteModule.exports : Module.prototype.require.call(this, name); };
 loaded._compile(output, outputPath);
 const { buildTransferExport, parseTransferFiles, noteMarkdown, createTransferData } = loaded.exports;
 const encode = (text) => new TextEncoder().encode(text);
@@ -63,6 +68,13 @@ const notes = { ...createTransferData('notes'), posts: [post] };
     const parsed = await parseTransferFiles([file('db.json', JSON.stringify(raw))], 'backup');
     for (const key of Object.keys(raw)) assert.deepEqual(parsed.data[key], raw[key]);
     const native = await parseTransferFiles([file('notes.json', JSON.stringify([post]))], 'notes'); assert.deepEqual(native.data.posts, [post]);
+  });
+  await test('raw database revision journals are ignored and never exported', async () => {
+    const raw = { feeds: backup.feeds, posts: backup.posts, savedArticles: backup.savedArticles, noteRevisions: { [post.id]: 999 } };
+    const parsed = await parseTransferFiles([file('db-with-history.json', JSON.stringify(raw))], 'backup');
+    assert.deepEqual(parsed.data.posts, raw.posts); assert.equal(parsed.data.noteRevisions, undefined);
+    const exported = await buildTransferExport({ ...backup, noteRevisions: raw.noteRevisions }, 'backup', 'json');
+    assert.equal(JSON.parse(decode(exported.bytes)).noteRevisions, undefined);
   });
   await test('external notes and articles aliases get only missing defaults', async () => {
     const note = await parseTransferFiles([file('external.json', JSON.stringify({ notes: [{ title: 'Été', body: 'Texte' }] }))], 'notes');
@@ -166,6 +178,19 @@ const notes = { ...createTransferData('notes'), posts: [post] };
   });
   await test('multiple files merge without dropping note metadata', async () => {
     const parsed = await parseTransferFiles([file('first.md', noteMarkdown(post)), file('second.json', JSON.stringify({ posts: [secondPost] }))], 'notes'); assert.deepEqual(parsed.data.posts, [post, secondPost]);
+  });
+  await test('multisource notes preserve references and excerpts in JSON, Markdown, HTML and ZIP', async () => {
+    const sources = [{ articleId: post.articleId, title: post.sourceArticleTitle, link: post.sourceArticleLink, feed: post.sourceArticleFeed }, { articleId: 'article-2', title: 'Deuxième source vérifiée', link: 'https://second.example/article', feed: 'Autre journal', excerpt: 'Extrait pour recouper les faits.' }];
+    const multiple = { ...post, revision: 7, sources };
+    for (const format of ['json', 'md', 'html']) {
+      const { data, result } = await roundtrip({ ...notes, posts: [multiple] }, 'notes', format);
+      assert.deepEqual(data.posts[0], multiple);
+      const text = decode(result.bytes);
+      assert.match(text, /Deuxième source vérifiée/); assert.match(text, /https:\/\/second.example\/article/);
+      if (format !== 'json') assert.match(text, /## Sources/);
+    }
+    const zip = await roundtrip({ ...notes, posts: [multiple, secondPost] }, 'notes', 'md');
+    assert.deepEqual(zip.data.posts[0].sources, sources);
   });
   console.log(`\n${count} transfer-format checks passed.`);
 })().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => { fs.rmSync(temporaryDirectory, { recursive: true, force: true }); });

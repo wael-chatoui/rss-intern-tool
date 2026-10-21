@@ -1,6 +1,7 @@
 import Parser from 'rss-parser';
 import { createHash } from 'crypto';
-import { FeedSource, RSSArticle } from '@/types';
+import { FeedSource, RSSArticle, FeedHealth } from '@/types';
+export type { FeedHealth } from '@/types';
 
 export function createArticleId(feedId: string, uniqueId: string): string {
   return `rss_${createHash('sha256').update(`${feedId}:${uniqueId}`).digest('hex').slice(0, 24)}`;
@@ -10,6 +11,7 @@ export interface FeedFetchResult {
   articles: RSSArticle[];
   failedFeedIds: string[];
   warnings: string[];
+  health: FeedHealth[];
 }
 
 const FEED_TIMEOUT_MS = 8000;
@@ -39,7 +41,7 @@ export function feedErrorMessage(error: unknown): string {
   return error instanceof FeedFetchError ? error.message : 'connexion impossible avec la source';
 }
 
-export async function parseFeedUrl(url: string, timeoutMs = FEED_TIMEOUT_MS) {
+async function downloadFeedDocument(url: string, timeoutMs = FEED_TIMEOUT_MS) {
   let address: URL;
   try {
     address = new URL(url.trim());
@@ -88,11 +90,7 @@ export async function parseFeedUrl(url: string, timeoutMs = FEED_TIMEOUT_MS) {
     let xml: string;
     try { xml = new TextDecoder(declaredEncoding).decode(bytes); }
     catch { throw new FeedFetchError('encodage du flux non pris en charge'); }
-    if (/^\s*(?:<!doctype\s+html|<html\b)/i.test(xml)) {
-      throw new FeedFetchError('la source renvoie une page HTML au lieu d’un flux RSS ou Atom');
-    }
-    try { return await parser.parseString(xml); }
-    catch { throw new FeedFetchError('flux XML/RSS ou Atom invalide'); }
+    return { text: xml, url: response.url || address.href, html: /text\/html/i.test(response.headers.get('content-type') || '') };
   } catch (error) {
     if (signal.aborted) throw new FeedFetchError(`délai dépassé (${timeoutMs / 1000} s)`);
     if (error instanceof FeedFetchError) throw error;
@@ -100,6 +98,59 @@ export async function parseFeedUrl(url: string, timeoutMs = FEED_TIMEOUT_MS) {
       || (error as { code?: string } | null)?.code;
     throw new FeedFetchError(`connexion impossible avec la source${code ? ` (${code})` : ''}`);
   }
+}
+
+function isHtml(text: string) { return /^\s*(?:<!doctype\s+html|<html\b)/i.test(text); }
+
+async function parseFeedDocument(text: string) {
+  if (isHtml(text)) throw new FeedFetchError('la source renvoie une page HTML au lieu d’un flux RSS ou Atom');
+  try { return await parser.parseString(text); }
+  catch { throw new FeedFetchError('flux XML/RSS ou Atom invalide'); }
+}
+
+export async function parseFeedUrl(url: string, timeoutMs = FEED_TIMEOUT_MS) {
+  return parseFeedDocument((await downloadFeedDocument(url, timeoutMs)).text);
+}
+
+/** Compare publisher addresses without fragments, default ports or trailing slashes. */
+export function normalizeFeedUrl(value: string): string {
+  const url = new URL(value.trim());
+  if (!['http:', 'https:'].includes(url.protocol)) throw new FeedFetchError('adresse de flux invalide (HTTP ou HTTPS requis)');
+  url.hash = '';
+  url.pathname = url.pathname.replace(/\/+$/, '') || '/';
+  url.searchParams.sort();
+  return url.href;
+}
+
+/** Read one website and at most three advertised feeds, within a shared deadline. */
+export async function discoverFeed(value: string) {
+  const deadline = Date.now() + 12000;
+  const remaining = () => Math.max(1, Math.min(FEED_TIMEOUT_MS, deadline - Date.now()));
+  const document = await downloadFeedDocument(value, remaining());
+  if (!document.html && !isHtml(document.text)) {
+    return { parsed: await parseFeedDocument(document.text), url: document.url };
+  }
+  const candidates: string[] = [];
+  for (const tag of document.text.match(/<link\b[^>]*>/gi) || []) {
+    const attributes = new Map<string, string>();
+    for (const match of Array.from(tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g))) {
+      attributes.set(match[1].toLowerCase(), (match[2] ?? match[3] ?? match[4]).replace(/&amp;/gi, '&'));
+    }
+    if (!attributes.get('rel')?.toLowerCase().split(/\s+/).includes('alternate') || !/^(?:application|text)\/(?:rss\+xml|atom\+xml|xml)(?:;|$)/i.test(attributes.get('type') || '')) continue;
+    try {
+      const candidate = new URL(attributes.get('href') || '', document.url);
+      if (['http:', 'https:'].includes(candidate.protocol) && !candidates.includes(candidate.href)) candidates.push(candidate.href);
+    } catch { /* An invalid discovery link does not invalidate the publisher website. */ }
+    if (candidates.length === 3) break;
+  }
+  for (const candidate of candidates) {
+    if (Date.now() >= deadline) break;
+    try {
+      const feedDocument = await downloadFeedDocument(candidate, remaining());
+      return { parsed: await parseFeedDocument(feedDocument.text), url: feedDocument.url };
+    } catch { /* Try the next explicitly advertised feed, never crawl the website. */ }
+  }
+  throw new FeedFetchError(candidates.length ? 'aucun des flux annoncés par ce site n’est lisible. Collez l’adresse exacte du flux RSS' : 'ce site n’annonce pas de flux RSS. Collez l’adresse exacte de son flux');
 }
 
 function extractImageUrl(item: any): string | undefined {
@@ -179,6 +230,7 @@ export async function fetchFeedArticles(feed: FeedSource): Promise<RSSArticle[]>
 export async function fetchAllActiveFeeds(feeds: FeedSource[]): Promise<FeedFetchResult> {
   const activeFeeds = feeds.filter(f => f.enabled);
   // Fetch concurrently with Promise.allSettled
+  const attemptedAt = new Date().toISOString();
   const results = await Promise.allSettled(
     activeFeeds.map(feed => fetchFeedArticles(feed))
   );
@@ -186,13 +238,17 @@ export async function fetchAllActiveFeeds(feeds: FeedSource[]): Promise<FeedFetc
   const allArticles: RSSArticle[] = [];
   const failedFeedIds: string[] = [];
   const warnings: string[] = [];
+  const health: FeedHealth[] = [];
   results.forEach((res, index) => {
+    const feed = activeFeeds[index];
     if (res.status === 'fulfilled' && res.value.length > 0) {
       allArticles.push(...res.value);
+      health.push({ feedId: feed.id, status: 'ok', lastAttemptAt: attemptedAt, lastSuccessAt: new Date().toISOString() });
     } else {
-      const feed = activeFeeds[index];
+      const error = res.status === 'rejected' ? feedErrorMessage(res.reason) : 'aucun article reçu';
+      health.push({ feedId: feed.id, status: 'error', lastAttemptAt: attemptedAt, error });
       failedFeedIds.push(feed.id);
-      warnings.push(`${feed.name} : ${res.status === 'rejected' ? feedErrorMessage(res.reason) : 'aucun article reçu'}. Les derniers articles disponibles sont conservés.`);
+      warnings.push(`${feed.name} : ${error}. Les derniers articles disponibles sont conservés.`);
     }
   });
 
@@ -207,5 +263,6 @@ export async function fetchAllActiveFeeds(feeds: FeedSource[]): Promise<FeedFetc
     articles: Array.from(new Map(allArticles.map(article => [article.id, article])).values()),
     failedFeedIds,
     warnings,
+    health,
   };
 }

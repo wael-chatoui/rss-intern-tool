@@ -252,3 +252,50 @@ button { transition: background-color var(--duration-fast), color var(--duration
 .notes-export-notice { margin-bottom: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 6px; color: var(--brand); background: var(--brand-soft); font-size: 12px; }
 @media (max-width: 767px) { .page-heading { align-items: center; } .page-heading h1 { font-size: 28px; } .page-actions { gap: 7px; } .notes-editor-toolbar { flex-wrap: wrap; gap: 5px; } .notes-export-format { max-width: 95px; } }
 @media (max-width: 520px) { .page-heading .page-actions .btn { min-width: 39px; } .notes-export-format { font-size: 12px !important; min-height: 36px; max-width: 90px; } }
+
+/* Reading and recovery controls share the existing paper/forest tokens. */
+.nav-item { text-decoration: none; }
+.article-meta, .article-meta strong, .row-copy .article-meta { font-size: 12px; }
+.featured-copy p, .row-copy p { font-size: 14px; line-height: 1.65; }
+.category-tag { font-size: 11px; }
+.read-link { font-size: 13px; min-height: 40px; }
+.feed-section-caption { font-size: 12px; }
+.feed-section-caption strong { font-size: 13px; }
+.feed-tab, .filter-toggle, .filter-panel label, .filter-reset { font-size: 13px; }
+.filter-panel select { font-size: 14px; }
+.warning-banner, .error-banner, .toast { font-size: 13px; }
+.carnet-note-status, .carnet-note small { font-size: 12px; }
+.carnet-note strong { font-size: 14px; }
+.carnet-footer button { font-size: 13px; min-height: 36px; }
+.source-summary-heading button { font-size: 12px; min-height: 36px; }
+.source-summary-row { font-size: 13px; min-height: 36px; }
+.carnet-load-state { padding: 18px; color: var(--ink-muted); font-size: 13px; line-height: 1.6; }
+.workspace-loading { display: flex; align-items: center; gap: 10px; min-height: 100px; color: var(--ink-muted); }
+.return-to-feed { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: var(--brand); font-size: 13px; margin: -12px 0 12px; }
+.return-to-feed:hover { text-decoration: underline; text-underline-offset: 4px; }
+.feed-active-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -4px 0 18px; color: var(--ink-muted); font-size: 12px; }
+.feed-active-filters span { background: var(--surface-muted); border: 1px solid var(--line); padding: 5px 8px; border-radius: 5px; max-width: 100%; overflow-wrap: anywhere; }
+.feed-active-filters button { color: var(--brand); min-height: 36px; padding: 4px 8px; text-decoration: underline; text-underline-offset: 3px; }
+.sync-partial .status-dot { background: #92753f; }
+.error-banner { flex-wrap: wrap; }
+.error-banner > span { flex: 1; min-width: 160px; }
+.error-banner > .btn { white-space: normal; }
+@media (max-width: 767px) {
+  .newsroom .save-article, .newsroom .view-toggle .icon-btn, .newsroom .search-control .icon-btn { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
+  .newsroom .article-row { grid-template-columns: 80px minmax(0,1fr) 44px; gap: 12px; }
+  .newsroom .article-list.compact .article-row { grid-template-columns: minmax(0,1fr) 44px; }
+  .newsroom .row-image { width: 80px; }
+  .newsroom .article-meta, .newsroom .article-meta strong, .newsroom .row-copy .article-meta { font-size: 12px; }
+  .newsroom .category-tag { font-size: 11px; }
+  .newsroom .row-copy p, .newsroom .featured-copy p { font-size: 14px; }
+  .newsroom .feed-tab { min-height: 44px; font-size: 13px; }
+  .newsroom .feed-tabs { gap: 15px; }
+  .newsroom .filter-toggle, .newsroom .page-heading .btn { min-height: 44px; }
+  .newsroom .search-control input::placeholder { font-size: 13px; }
+  .newsroom .filter-panel select { font-size: 16px; }
+  .newsroom .feed-toolbar { flex-wrap: wrap; }
+  .newsroom .search-control { flex-basis: 100%; }
+  .newsroom .filter-toggle { flex: 1; }
+  .newsroom .return-to-feed { margin-top: 0; }
+  .newsroom .error-banner > .btn { min-height: 44px; }
+}

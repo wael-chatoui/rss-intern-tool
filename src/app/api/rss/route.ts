@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { protectApi } from '@/lib/auth';
 import { getDb, updateDb } from '@/lib/db';
 import { createArticleId, fetchAllActiveFeeds } from '@/lib/rss';
-import { DatabaseSchema, RSSArticle } from '@/types';
+import { DatabaseSchema, RSSArticle, FeedHealth } from '@/types';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -17,6 +17,7 @@ interface RuntimeCache {
   articles: RSSArticle[];
   lastFetchedAt?: string;
   warnings: string[];
+  health: FeedHealth[];
 }
 const cacheGlobal = globalThis as typeof globalThis & { __rssRuntimeCache?: RuntimeCache };
 function feedSignature(feeds: DatabaseSchema['feeds']): string {
@@ -38,6 +39,29 @@ async function saveRssCache(mutate: (latest: DatabaseSchema) => DatabaseSchema):
     if (!pending || !isReadOnlyStorage(error)) throw error;
     return { database: pending, temporary: true };
   }
+}
+
+function sourceHealth(db: DatabaseSchema): FeedHealth[] {
+  const previous = new Map((db.feedHealth || []).map(item => [item.feedId, item]));
+  return db.feeds.map(feed => previous.get(feed.id) || { feedId: feed.id, status: 'never' as const });
+}
+function healthWarnings(db: DatabaseSchema): string[] {
+  const health = new Map(sourceHealth(db).map(item => [item.feedId, item]));
+  return db.feeds.filter(feed => feed.enabled && health.get(feed.id)?.status === 'error').map(feed =>
+    `${feed.name} : ${health.get(feed.id)?.error || 'collecte impossible'}. Les derniers articles disponibles sont conservés.`);
+}
+
+function needsCollection(db: DatabaseSchema): boolean {
+  const active = db.feeds.filter(feed => feed.enabled);
+  if (!active.length) return false;
+  const lastFetched = db.lastFetchedAt ? new Date(db.lastFetchedAt).getTime() : 0;
+  if (!(db.cachedArticles || []).length || !lastFetched || Date.now() - lastFetched > CACHE_TTL_MS) return true;
+  const health = new Map(sourceHealth(db).map(item => [item.feedId, item]));
+  return active.some(feed => {
+    const attempted = health.get(feed.id)?.lastAttemptAt;
+    if (attempted) return !Number.isFinite(Date.parse(attempted)) || Date.now() - Date.parse(attempted) > CACHE_TTL_MS;
+    return !(db.cachedArticles || []).some(article => article.feedId === feed.id);
+  });
 }
 
 function articleIdentity(article: RSSArticle): string {
@@ -109,7 +133,9 @@ export async function GET(req: Request) {
     const category = searchParams.get('category');
     const language = searchParams.get('language');
     const query = searchParams.get('q')?.trim().toLowerCase();
-    const forceRefresh = searchParams.get('refresh') === 'true';
+    const cacheOnly = searchParams.get('cacheOnly') === 'true';
+    const forceRefresh = !cacheOnly && searchParams.get('refresh') === 'true';
+    const targetedRefresh = forceRefresh && feedId && feedId !== 'all' ? feedId : null;
 
     let db = await getDb();
     const runtimeCache = cacheGlobal.__rssRuntimeCache;
@@ -118,23 +144,25 @@ export async function GET(req: Request) {
     if (useRuntimeCache && runtimeCache) {
       db.cachedArticles = runtimeCache.articles;
       db.lastFetchedAt = runtimeCache.lastFetchedAt;
+      db.feedHealth = runtimeCache.health;
     }
     let needsSave = normalizeStoredArticles(db);
     let targetFeeds = db.feeds.filter(feed => feed.enabled);
+    if (targetedRefresh && !targetFeeds.some(feed => feed.id === targetedRefresh)) return NextResponse.json({ error: 'Cette source n’existe plus ou est en pause.' }, { status: 404 });
     const activeFeedIds = new Set(targetFeeds.map(feed => feed.id));
     const previousCache = (db.cachedArticles || []).filter(article => activeFeedIds.has(article.feedId));
     if (previousCache.length !== db.cachedArticles?.length) needsSave = true;
     db.cachedArticles = previousCache;
 
-    const lastFetched = db.lastFetchedAt ? new Date(db.lastFetchedAt).getTime() : 0;
-    const isCacheExpired = previousCache.length === 0 || !lastFetched || Date.now() - lastFetched > CACHE_TTL_MS;
+    const isCacheExpired = needsCollection(db);
     let allRawArticles = previousCache;
-    let warnings: string[] = useRuntimeCache && runtimeCache ? [...runtimeCache.warnings] : [];
-    let isFromCache = !forceRefresh && !isCacheExpired;
+    let warnings: string[] = healthWarnings(db);
+    let isFromCache = cacheOnly || (!forceRefresh && !isCacheExpired);
 
-    if (forceRefresh || isCacheExpired) {
-      const result = await fetchAllActiveFeeds(targetFeeds);
-      const fetchedFeedIds = new Set(targetFeeds.map(feed => feed.id));
+    if (!cacheOnly && (forceRefresh || isCacheExpired)) {
+      const collectionFeeds = targetedRefresh ? targetFeeds.filter(feed => feed.id === targetedRefresh) : targetFeeds;
+      const result = await fetchAllActiveFeeds(collectionFeeds);
+      const fetchedFeedIds = new Set(collectionFeeds.map(feed => feed.id));
 
       // The network runs outside the lock; merge into the latest persisted state
       // inside one transaction so concurrent note and bookmark saves are retained.
@@ -142,21 +170,32 @@ export async function GET(req: Request) {
         if (useRuntimeCache && runtimeCache) {
           latest.cachedArticles = runtimeCache.articles;
           latest.lastFetchedAt = runtimeCache.lastFetchedAt;
+          latest.feedHealth = runtimeCache.health;
         }
         normalizeStoredArticles(latest);
         targetFeeds = latest.feeds.filter(feed => feed.enabled);
         const currentActiveFeedIds = new Set(targetFeeds.map(feed => feed.id));
         const latestCache = (latest.cachedArticles || []).filter(article => currentActiveFeedIds.has(article.feedId));
-        warnings = result.warnings.filter((_, index) => currentActiveFeedIds.has(result.failedFeedIds[index]));
+        const latestHealth = new Map((latest.feedHealth || []).map(item => [item.feedId, item]));
+        const acceptedFeedIds = new Set<string>();
+        for (const item of result.health) {
+          if (!currentActiveFeedIds.has(item.feedId)) continue;
+          const previous = latestHealth.get(item.feedId);
+          if (previous?.lastAttemptAt && item.lastAttemptAt && Date.parse(item.lastAttemptAt) < Date.parse(previous.lastAttemptAt)) continue;
+          acceptedFeedIds.add(item.feedId);
+          latestHealth.set(item.feedId, { ...item, lastSuccessAt: item.lastSuccessAt || previous?.lastSuccessAt });
+        }
+        latest.feedHealth = latest.feeds.map(feed => latestHealth.get(feed.id) || { feedId: feed.id, status: 'never' });
+        warnings = healthWarnings(latest);
         const failedFeedIds = new Set(result.failedFeedIds);
         const identityIds = new Map(
           [...latestCache, ...latest.savedArticles].map(article => [articleIdentity(article), article.id])
         );
-        const refreshedArticles = result.articles.filter(article => currentActiveFeedIds.has(article.feedId)).map(article => ({
+        const refreshedArticles = result.articles.filter(article => currentActiveFeedIds.has(article.feedId) && acceptedFeedIds.has(article.feedId)).map(article => ({
           ...article,
           id: identityIds.get(articleIdentity(article)) || article.id,
         }));
-        const retainedArticles = latestCache.filter(article => failedFeedIds.has(article.feedId) || !fetchedFeedIds.has(article.feedId));
+        const retainedArticles = latestCache.filter(article => failedFeedIds.has(article.feedId) || !fetchedFeedIds.has(article.feedId) || !acceptedFeedIds.has(article.feedId));
         latest.cachedArticles = Array.from(new Map(
           [...refreshedArticles, ...retainedArticles].map(article => [article.id, article])
         ).values()).sort((a, b) => (new Date(b.pubDate).getTime() || 0) - (new Date(a.pubDate).getTime() || 0));
@@ -172,7 +211,7 @@ export async function GET(req: Request) {
       if (saved.temporary) {
         cacheGlobal.__rssRuntimeCache = {
           feeds: feedSignature(db.feeds), articles: db.cachedArticles || [],
-          lastFetchedAt: db.lastFetchedAt, warnings: [...warnings],
+          lastFetchedAt: db.lastFetchedAt, warnings: [...warnings], health: db.feedHealth || [],
         };
       } else {
         delete cacheGlobal.__rssRuntimeCache;
@@ -180,11 +219,12 @@ export async function GET(req: Request) {
       needsSave = false;
     }
 
-    if (needsSave) {
+    if (needsSave && !cacheOnly) {
       const saved = await saveRssCache(latest => {
         if (useRuntimeCache && runtimeCache) {
           latest.cachedArticles = runtimeCache.articles;
           latest.lastFetchedAt = runtimeCache.lastFetchedAt;
+          latest.feedHealth = runtimeCache.health;
         }
         normalizeStoredArticles(latest);
         const activeIds = new Set(latest.feeds.filter(feed => feed.enabled).map(feed => feed.id));
@@ -196,7 +236,7 @@ export async function GET(req: Request) {
       if (saved.temporary) {
         cacheGlobal.__rssRuntimeCache = {
           feeds: feedSignature(db.feeds), articles: db.cachedArticles || [],
-          lastFetchedAt: db.lastFetchedAt, warnings: [...warnings],
+          lastFetchedAt: db.lastFetchedAt, warnings: [...warnings], health: db.feedHealth || [],
         };
       }
     }
@@ -212,7 +252,7 @@ export async function GET(req: Request) {
     });
 
     const articles = allRawArticles.filter(article => {
-      if (feedId && feedId !== 'all' && article.feedId !== feedId) return false;
+      if (!targetedRefresh && feedId && feedId !== 'all' && article.feedId !== feedId) return false;
       if (category && category !== 'all' && article.category !== category) return false;
       if (language && language !== 'all' && article.feedLanguage !== language) return false;
       if (query && ![article.title, article.snippet, article.author || ''].some(value => value.toLowerCase().includes(query))) return false;
@@ -229,6 +269,8 @@ export async function GET(req: Request) {
       isFromCache,
       cacheIsTemporary,
       warnings,
+      health: sourceHealth(db),
+      needsRefresh: needsCollection(db),
     });
   } catch (error) {
     console.error('Error fetching RSS articles:', error);

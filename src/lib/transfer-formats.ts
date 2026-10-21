@@ -1,6 +1,7 @@
 import { unzipSync, zipSync } from 'fflate';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { getNoteSources } from '@/lib/note-model';
 import type { FeedSource, RSSArticle, SocialPost } from '@/types';
 
 export type TransferTarget = 'notes' | 'feeds' | 'articles' | 'backup';
@@ -84,7 +85,7 @@ function normaliseFeed(value: UnknownRecord): FeedSource {
   if (!('url' in base)) base.url = base.xmlUrl ?? base.feedUrl ?? '';
   if (!('name' in base)) base.name = base.title ?? base.text ?? base.url;
   if (!('website' in base)) base.website = base.htmlUrl ?? base.url;
-  if (!('category' in base)) base.category = 'trends';
+  if (!('category' in base)) base.category = 'general';
   if (!('language' in base)) base.language = 'fr';
   if (!('enabled' in base)) base.enabled = true;
   for (const alias of ['xmlUrl', 'feedUrl', 'title', 'text', 'htmlUrl']) delete base[alias];
@@ -98,7 +99,7 @@ function normaliseArticle(value: UnknownRecord): RSSArticle {
   if (!('feedName' in base)) base.feedName = base.source ?? 'Source importée';
   if (!('feedId' in base)) base.feedId = stableFeedId(stringValue(base.feedName, 'Source importée'));
   if (!('feedLanguage' in base)) base.feedLanguage = base.language ?? 'fr';
-  if (!('category' in base)) base.category = 'trends';
+  if (!('category' in base)) base.category = 'general';
   if (!('pubDate' in base)) base.pubDate = base.date ?? base.publishedAt ?? new Date().toISOString();
   if (!('snippet' in base)) base.snippet = base.summary ?? base.description ?? '';
   for (const alias of ['headline', 'url', 'source', 'language', 'date', 'publishedAt', 'summary', 'description']) delete base[alias];
@@ -420,7 +421,8 @@ export async function parseTransferFiles(files: File[], target: TransferTarget):
 function postTitle(post: SocialPost) { return post.angle || 'Note sans titre'; }
 function readablePost(post: SocialPost): string {
   const sections = [`# ${postTitle(post)}`, post.notes || ''];
-  if (post.sourceArticleTitle || post.sourceArticleLink) sections.push(`## Source\n${post.sourceArticleTitle || ''}\n${post.sourceArticleLink || ''}\n${post.sourceArticleFeed || ''}`);
+  const sources = getNoteSources(post);
+  if (sources.length) sections.push(`## Sources\n${sources.map((source, index) => `${index + 1}. ${source.title}\n${source.feed}\n${source.link}${source.excerpt ? `\n${source.excerpt}` : ''}`).join('\n\n')}`);
   if (post.content.tiktok.hook || post.content.tiktok.script || post.content.tiktok.visualNotes || post.content.tiktok.durationEstimate) sections.push(`## TikTok\n\n### Accroche\n${post.content.tiktok.hook}\n\n### Script\n${post.content.tiktok.script}\n\n### Mise en images\n${post.content.tiktok.visualNotes}\n\nDurée : ${post.content.tiktok.durationEstimate}`);
   if (post.content.instagram.caption || post.content.instagram.carouselSlides.length || post.content.instagram.hashtags.length) sections.push(`## Instagram\n\n${post.content.instagram.caption}\n\n${post.content.instagram.carouselSlides.map((slide, index) => `### Diapositive ${index + 1}\n${slide}`).join('\n\n')}\n\n${post.content.instagram.hashtags.join(' ')}`);
   if (post.content.linkedin.title || post.content.linkedin.body || post.content.linkedin.keyTakeaways.length) sections.push(`## LinkedIn\n\n### ${post.content.linkedin.title || 'Publication'}\n${post.content.linkedin.body}\n\n${post.content.linkedin.keyTakeaways.map((point) => `- ${point}`).join('\n')}`);

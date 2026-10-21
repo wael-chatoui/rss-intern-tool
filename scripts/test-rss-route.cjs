@@ -36,7 +36,7 @@ class NextResponse extends Response {
   }
 }
 
-function harness({ database = baseline(), fetchResult, writeError } = {}) {
+function harness({ database = baseline(), fetchResult, writeError, expectedFeedIds = ['source-a', 'source-b'] } = {}) {
   let persisted = structuredClone(database);
   let currentTime = NOW;
   const calls = { fetch: 0, update: 0, mutations: [], logs: [] };
@@ -65,8 +65,14 @@ function harness({ database = baseline(), fetchResult, writeError } = {}) {
       createArticleId,
       fetchAllActiveFeeds: async activeFeeds => {
         calls.fetch++;
-        assert.deepEqual(Array.from(activeFeeds, feed => feed.id), ['source-a', 'source-b']);
-        return structuredClone(typeof fetchResult === 'function' ? await fetchResult(calls.fetch) : fetchResult);
+        assert.deepEqual(Array.from(activeFeeds, feed => feed.id), expectedFeedIds);
+        const result = structuredClone(typeof fetchResult === 'function' ? await fetchResult(calls.fetch) : fetchResult);
+        result.health ||= Array.from(activeFeeds, feed => {
+          const failedIndex = result.failedFeedIds.indexOf(feed.id);
+          const error = failedIndex >= 0 ? (result.warnings[failedIndex] || 'collecte impossible').replace(`${feed.name} : `, '').replace(/\. Les derniers articles disponibles sont conservés\.$/, '').replace(/\.$/, '') : undefined;
+          return { feedId: feed.id, status: failedIndex >= 0 ? 'error' : 'ok', lastAttemptAt: new TestDate().toISOString(), ...(error ? { error } : { lastSuccessAt: new TestDate().toISOString() }) };
+        });
+        return result;
       },
     },
   };
@@ -158,7 +164,7 @@ async function main() {
       writeError,
       fetchResult: {
         articles: [], failedFeedIds: ['source-a', 'source-b'],
-        warnings: ['Journal A : connexion impossible.', sourceWarning],
+        warnings: ['Journal A : connexion impossible. Les derniers articles disponibles sont conservés.', sourceWarning],
       },
     });
     response = await failed.get('?refresh=true');
@@ -166,7 +172,7 @@ async function main() {
     assert.deepEqual(response.body.articles.map(item => item.id), [article(12).id, article(11, feeds[1]).id]);
     assert.equal(response.body.lastFetchedAt, STALE_AT, 'an outage must not claim a successful synchronization now');
     assert.equal(response.body.isFromCache, true);
-    assert.ok(response.body.warnings.includes('Journal A : connexion impossible.'));
+    assert.ok(response.body.warnings.includes('Journal A : connexion impossible. Les derniers articles disponibles sont conservés.'));
     assert.ok(response.body.warnings.includes(sourceWarning));
     failed.advance(60_000);
     response = await failed.get();
@@ -184,6 +190,67 @@ async function main() {
   assert.equal(response.status, 500, 'non-storage exceptions must not silently become successful responses');
   assert.equal(typeof response.body.error, 'string');
   assert.ok(!response.body.error.includes('Unexpected transaction bug'));
+  groups++;
+
+  const cachedDatabase = baseline();
+  cachedDatabase.feedHealth = [{ feedId: 'source-b', status: 'error', error: 'HTTP 403 (accès refusé)', lastAttemptAt: STALE_AT, lastSuccessAt: '2026-10-13T12:00:00Z' }];
+  const cacheOnly = harness({ database: cachedDatabase });
+  response = await cacheOnly.get('?cacheOnly=true&refresh=true');
+  assert.equal(response.status, 200);
+  assert.equal(cacheOnly.calls.fetch, 0, 'cacheOnly must never contact sources, even with refresh=true');
+  assert.equal(cacheOnly.calls.update, 0, 'opening cached content must not wait for a disk write');
+  assert.equal(response.body.needsRefresh, true);
+  assert.equal(response.body.isFromCache, true);
+  assert.deepEqual(response.body.warnings, [sourceWarning], 'source errors survive a new cache-only request');
+  assert.equal(response.body.health.find(item => item.feedId === 'source-b').lastSuccessAt, '2026-10-13T12:00:00Z');
+  groups++;
+
+  const targeted = harness({ database: cachedDatabase, expectedFeedIds: ['source-a'], fetchResult: { articles: [article(15)], failedFeedIds: [], warnings: [] } });
+  response = await targeted.get('?refresh=true&feedId=source-a');
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.articles.map(item => item.id), [article(15).id, article(11, feeds[1]).id], 'targeted refresh keeps the other sources visible');
+  assert.deepEqual(response.body.warnings, [sourceWarning], 'targeted success must not clear another source error');
+  assert.equal(targeted.persisted().feedHealth.find(item => item.feedId === 'source-a').status, 'ok');
+  const updatesBefore = targeted.calls.update;
+  response = await targeted.get('?refresh=true&feedId=disabled');
+  assert.equal(response.status, 404);
+  assert.equal(targeted.calls.fetch, 1);
+  assert.equal(targeted.calls.update, updatesBefore);
+  groups++;
+
+  const failedHealth = harness({ database: cachedDatabase, expectedFeedIds: ['source-b'], fetchResult: { articles: [], failedFeedIds: ['source-b'], warnings: [sourceWarning] } });
+  response = await failedHealth.get('?refresh=true&feedId=source-b');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.health.find(item => item.feedId === 'source-b').lastSuccessAt, '2026-10-13T12:00:00Z', 'failure must preserve the last successful collection date');
+  assert.equal(response.body.health.find(item => item.feedId === 'source-b').lastAttemptAt, new Date(NOW).toISOString());
+  groups++;
+
+  const perSourceDatabase = baseline();
+  perSourceDatabase.lastFetchedAt = new Date(NOW).toISOString();
+  perSourceDatabase.feedHealth = [{ feedId: 'source-a', status: 'ok', lastAttemptAt: STALE_AT, lastSuccessAt: STALE_AT }, { feedId: 'source-b', status: 'ok', lastAttemptAt: new Date(NOW).toISOString(), lastSuccessAt: new Date(NOW).toISOString() }];
+  const perSource = harness({ database: perSourceDatabase });
+  response = await perSource.get('?cacheOnly=true');
+  assert.equal(response.body.needsRefresh, true, 'a recent targeted refresh must not hide another stale source');
+  assert.equal(perSource.calls.fetch, 0);
+  groups++;
+
+  let releaseOlder;
+  let markStarted;
+  const fetchStarted = new Promise(resolve => { markStarted = resolve; });
+  const olderResult = new Promise(resolve => { releaseOlder = () => resolve({ articles: [article(12)], failedFeedIds: [], warnings: [], health: [{ feedId: 'source-a', status: 'ok', lastAttemptAt: new Date(NOW).toISOString(), lastSuccessAt: new Date(NOW).toISOString() }] }); });
+  const concurrent = harness({ expectedFeedIds: ['source-a'], fetchResult: call => {
+    if (call === 1) { markStarted(); return olderResult; }
+    return { articles: [article(16)], failedFeedIds: [], warnings: [], health: [{ feedId: 'source-a', status: 'ok', lastAttemptAt: new Date(NOW + 1000).toISOString(), lastSuccessAt: new Date(NOW + 1000).toISOString() }] };
+  } });
+  const olderRequest = concurrent.get('?refresh=true&feedId=source-a');
+  await fetchStarted;
+  concurrent.advance(1000);
+  response = await concurrent.get('?refresh=true&feedId=source-a');
+  assert.equal(response.status, 200);
+  releaseOlder();
+  response = await olderRequest;
+  assert.equal(response.status, 200);
+  assert.equal(concurrent.persisted().cachedArticles.find(item => item.feedId === 'source-a').id, article(16).id, 'a slower older collection must not overwrite a newer source result');
   groups++;
 
   const replacements = [

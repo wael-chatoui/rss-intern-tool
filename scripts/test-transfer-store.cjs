@@ -17,11 +17,12 @@ async function main() {
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText;
     const module = { exports: {} };
     const wrapper = vm.runInContext(`(function(require, module, exports) { ${compiled}\n})`, context, { filename });
-    wrapper(name => Object.hasOwn(imports, name) ? imports[name] : require(name), module, module.exports);
+    wrapper(name => name === '@/lib/note-model' ? noteModel : Object.hasOwn(imports, name) ? imports[name] : require(name), module, module.exports);
     return module.exports;
   }
+  const noteModel = load('src/lib/note-model.ts');
   const plain = value => JSON.parse(JSON.stringify(value));
-  const withoutExportDate = value => { const result = plain(value); delete result.exportedAt; return result; };
+  const withoutExportDate = value => { const result = plain(value); delete result.exportedAt; if (result.posts) result.posts.forEach(post => delete post.revision); return result; };
   let groups = 0;
   try {
     const database = load('src/lib/db.ts', { '@/lib/feed-catalog': load('src/lib/feed-catalog.ts') });
@@ -117,7 +118,7 @@ async function main() {
     assert.equal(preview.summary.articles.added, 1);
     assert.ok(preview.warnings.includes('Articles importés conservés dans Enregistrés.'));
     await store.applyTransferImport(orphan, 'merge', 'skip', preview.revision);
-    const rssRoute = load('src/app/api/rss/route.ts', { '@/lib/auth': { protectApi: async () => null }, '@/lib/db': database, '@/lib/rss': { createArticleId: rss.createArticleId, fetchAllActiveFeeds: async () => ({ articles: [], failedFeedIds: [], warnings: [] }) }, 'next/server': { NextResponse: { json: value => value } } });
+    const rssRoute = load('src/app/api/rss/route.ts', { '@/lib/auth': { protectApi: async () => null }, '@/lib/db': database, '@/lib/rss': { createArticleId: rss.createArticleId, fetchAllActiveFeeds: async () => ({ articles: [], failedFeedIds: [], warnings: [], health: [] }) }, 'next/server': { NextResponse: { json: value => value } } });
     const afterRss = await rssRoute.GET(new Request('http://localhost/api/rss?refresh=true'));
     assert.equal(afterRss.articles.length, 0);
     assert.equal(afterRss.savedArticles.length, 1);
@@ -247,6 +248,24 @@ async function main() {
     assert.equal(response.status, 400);
     assert.equal(apiSnapshot.data.kind, 'backup');
     assert.ok(applied.backups.length <= 10, 'a later successful maintenance restores the retention limit');
+    groups++;
+    await reset();
+    const multiSourceNote = { ...note('note-a'), revision: 999, sources: [{ articleId: article(1).id, title: article(1).title, link: article(1).link, feed: source.name }, { articleId: 'foreign-reference', title: 'Second recoupement', link: article(3).link, feed: source.name, excerpt: 'Un fait supplémentaire' }] };
+    const multiImport = envelope('backup', { feeds: [source], posts: [multiSourceNote], savedArticles: [{ ...article(3), id: 'foreign-reference' }] });
+    preview = await store.previewTransferImport(multiImport, 'merge', 'update');
+    await store.applyTransferImport(multiImport, 'merge', 'update', preview.revision);
+    current = await database.getDb();
+    assert.equal(current.posts[0].revision, 1, 'imported revision is never a local concurrency token');
+    assert.equal(current.posts[0].sources.length, 2);
+    assert.equal(current.posts[0].sources[1].articleId, article(3).id, 'every source is remapped after imported article migration');
+    assert.equal(current.posts[0].sources[1].excerpt, 'Un fait supplémentaire');
+    const oldBackup = envelope('backup', { feeds: [source], posts: [{ ...multiSourceNote, revision: 0 }], savedArticles: [] });
+    preview = await store.previewTransferImport(oldBackup, 'replace', 'skip');
+    await store.applyTransferImport(oldBackup, 'replace', 'skip', preview.revision);
+    assert.equal((await database.getDb()).posts[0].revision, 2, 'restoring an older backup invalidates open editors');
+    const beforeInvalidSource = (await store.getTransferSnapshot()).revision;
+    await assert.rejects(store.previewTransferImport(envelope('notes', { posts: [{ ...multiSourceNote, sources: [{ title: 'Invalid', link: 'javascript:alert(1)', feed: 'Test' }] }] })), error => error.status === 400);
+    assert.equal((await store.getTransferSnapshot()).revision, beforeInvalidSource);
     groups++;
     console.log(`Transfer store: ${groups} groups passed (temporary database only, no network).`);
   } finally { await fsp.rm(directory, { recursive: true, force: true }); }

@@ -124,6 +124,7 @@ async function main() {
         '@/lib/auth': test.auth, 'next/server': { NextResponse },
         '@/lib/db': dependency, '@/lib/rss': dependency, '@/lib/feed-catalog': dependency,
         '@/lib/transfer-store': dependency,
+        '@/lib/note-model': dependency,
       });
       for (const method of ['GET', 'POST', 'PATCH', 'PUT', 'DELETE']) {
         if (typeof route[method] !== 'function') continue;

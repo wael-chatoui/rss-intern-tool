@@ -1,0 +1,30 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const ts = require('typescript');
+function load(file) {
+  const module = { exports: {} };
+  const compiled = ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+  new Function('module', 'exports', 'require', compiled)(module, module.exports, require);
+  return module.exports;
+}
+const { freshWorkspaceState, readWorkspaceUrl, workspaceUrl, normalizeWorkspaceState } = load('src/lib/workspace-state.ts');
+const { normalizeSearchText } = load('src/lib/search.ts');
+const state = freshWorkspaceState();
+state.feeds.veille = { ...state.feeds.veille, query: 'Économie & création', category: 'general', language: 'fr', feedId: 'source/a', tab: 'unread', compact: true, visibleCount: 60, scrollY: 720 };
+state.feeds.saved = { ...state.feeds.saved, query: 'autre sélection', scrollY: 240 };
+state.activeArticleId = 'rss/sujet?x=1';
+let restored = readWorkspaceUrl(workspaceUrl(state).split('?')[1], state);
+assert.deepEqual(restored.feeds, state.feeds);
+assert.equal(restored.activeArticleId, state.activeArticleId);
+state.view = 'notes'; state.selectedPostId = 'note & idée'; state.activeArticleId = null; state.returnTo = 'veille';
+restored = readWorkspaceUrl(workspaceUrl(state).split('?')[1], state);
+assert.equal(restored.view, 'notes'); assert.equal(restored.selectedPostId, state.selectedPostId); assert.equal(restored.returnTo, 'veille'); assert.equal(restored.feeds.veille.scrollY, 720);
+const shared = readWorkspaceUrl(workspaceUrl(freshWorkspaceState()).split('?')[1], state);
+assert.equal(shared.feeds.veille.query, ''); assert.equal(shared.feeds.veille.feedId, 'all'); assert.equal(shared.selectedPostId, null);
+const invalid = readWorkspaceUrl('?view=unknown&category=evil&language=xx&tab=evil&limit=NaN');
+assert.equal(invalid.view, 'veille'); assert.equal(invalid.feeds.veille.category, 'all'); assert.equal(invalid.feeds.veille.language, 'all'); assert.equal(invalid.feeds.veille.visibleCount, 15);
+assert.equal(normalizeWorkspaceState({ view: 'notes', feeds: { veille: { visibleCount: 1e12, scrollY: -5 } } }).feeds.veille.visibleCount, 10000);
+assert.equal(normalizeSearchText('<p>Une enqu&#234;te &amp; une CRÉATION</p><script>introuvable</script>'), 'une enquete & une creation');
+assert.equal(normalizeSearchText('éCONOMIE\n    durable'), 'economie durable');
+console.log('Workspace state: URLs, independent views, restored context, invalid inputs and full-text search passed.');
