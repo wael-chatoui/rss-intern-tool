@@ -63,7 +63,8 @@ async function main() {
     assert.equal(signedUp.status, 201);const newCookie = signedUp.headers.get('set-cookie');assert.ok(newCookie.includes('HttpOnly'));
     const tokenC = /redaction_session=([^;]+)/.exec(newCookie)[1];
     assert.equal((await get('/api/account/export', tokenC)).status, 200);
-    assert.deepEqual((await (await get('/api/account/export', tokenC)).json()).posts, []);
+    const newWorkspace = await (await get('/api/account/export', tokenC)).json();
+    assert.deepEqual(newWorkspace.posts, []); assert.deepEqual(newWorkspace.feeds, []);
     console.log('Production HTTP: compiled Next server, owner/A/B cookie isolation, same note IDs, forged account input, cross-origin writes, subscription gates, canceled read/export, no-key checkout safety, signup isolation and HttpOnly cookies passed (temporary local SQLite, no external calls).');
   } finally {
     if (server) { server.kill('SIGTERM');await new Promise(resolve => server.once('exit', resolve)); }

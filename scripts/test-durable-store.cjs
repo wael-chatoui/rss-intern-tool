@@ -68,7 +68,7 @@ async function worker() {
     await assert.rejects(billing.setAccountBilling({ ...event, customerId: 'cus_wrong', lastEventId: 'evt_wrong' }), /correspond pas/);
     const ownerBefore = await workspace.inWorkspace('owner', () => database.getDb());
     await workspace.inWorkspace(first.id, async () => {
-      const initial = await database.getDb(); assert.equal(initial.posts.length, 0); assert.equal(initial.savedArticles.length, 0);
+      const initial = await database.getDb(); assert.equal(initial.posts.length, 0); assert.equal(initial.savedArticles.length, 0); assert.equal(initial.feeds.length, 0, 'new subscribers choose their own sources');
       await database.updateDb(value => { value.readArticleIds = ['only-a']; });
     });
     await workspace.inWorkspace(second.id, async () => { assert.equal((await database.getDb()).readArticleIds, undefined); await database.updateDb(value => { value.readArticleIds = ['only-b']; }); });

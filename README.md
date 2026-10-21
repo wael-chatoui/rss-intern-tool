@@ -84,7 +84,7 @@ Vérification : `npm test` (notes versionnées, brouillons, parcours d’écritu
 
 ## Authentification, espaces privés et abonnement
 
-Le propriétaire conserve son espace existant et ne paie pas d’abonnement. Chaque abonné possède un compte, des sessions, un document éditorial et des sauvegardes indépendants. Le serveur déduit l’espace du cookie de session opaque ; aucun identifiant fourni par le navigateur ne sélectionne un autre compte. Une nouvelle inscription ne reçoit aucune note du propriétaire ni d’un autre abonné.
+Le propriétaire conserve son espace existant et ne paie pas d’abonnement. Chaque abonné possède un compte, des sessions, un document éditorial et des sauvegardes indépendants. Le serveur déduit l’espace du cookie de session opaque ; aucun identifiant fourni par le navigateur ne sélectionne un autre compte. Une nouvelle inscription commence avec un espace vide et choisit ses propres sources. Elle ne reçoit aucune note ni source du propriétaire ou d’un autre abonné.
 
 Les inscriptions sont fermées par défaut (`PUBLIC_SIGNUP_ENABLED=0`). Le paiement est fermé par défaut (`BILLING_ENABLED=0`). Avant ouverture : vérifier l’identité et les informations du vendeur, les conditions applicables à l’hébergement et une recette Stripe en mode test. Aucun tarif n’est envoyé par le navigateur : le prix autorisé est `STRIPE_PRICE_MONTHLY` côté serveur. Checkout accepte les codes promotionnels créés dans Stripe. Le portail Stripe permet de gérer l’abonnement et les factures.
 

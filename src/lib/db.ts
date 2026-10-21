@@ -198,7 +198,7 @@ async function readDatabaseFile(): Promise<DatabaseSchema> {
     const documentId = durable ? await editorialDocumentId() : '';
     const raw = durable ? await readDurableDocument(documentId) : await fs.readFile(DB_FILE, 'utf-8');
     if (raw === null) {
-      if (documentId.startsWith('editorial:member_')) return { feeds: structuredClone(DEFAULT_FEEDS), posts: [], savedArticles: [] };
+      if (documentId.startsWith('editorial:member_')) return { feeds: [], posts: [], savedArticles: [] };
       // The remote store is initialized deliberately by the migration command.
       // Never replace a missing or misconfigured production DB with demo data.
       throw new Error('L’espace éditorial doit être initialisé avant utilisation.');
