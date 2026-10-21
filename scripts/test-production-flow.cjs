@@ -38,6 +38,11 @@ async function main() {
       const body = await response.json();assert.equal(body.posts.length, 1);assert.equal(body.posts[0].notes, `Texte privé ${expected}`);
       assert.ok(!(response.headers.get('cache-control') || '').includes('public'));
     }
+    await Promise.all(Array.from({ length: 18 }, async (_, index) => {
+      const [token, expected] = [[owner.token, 'owner'], [sessionA.token, 'A'], [sessionB.token, 'B']][index % 3];
+      const result = await (await get('/api/posts', token)).json();
+      assert.equal(result.posts[0].notes, `Texte privé ${expected}`, 'request-local workspace survives concurrent cookie lookups and the shared operation queue');
+    }));
     const aOriginal = (await (await get('/api/posts', sessionA.token)).json()).posts[0];
     const response = await get('/api/posts', sessionA.token, { method: 'PUT', headers: { origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ ...aOriginal, revision: 0, notes: 'Modification privée A' }) });
     assert.equal(response.status, 200);
