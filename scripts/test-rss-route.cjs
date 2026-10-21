@@ -289,6 +289,8 @@ async function main() {
   }
   const catalog = loadDatabaseModule('src/lib/feed-catalog.ts', {});
   const realDatabase = loadDatabaseModule('src/lib/db.ts', {
+    '@/lib/durable-store': { usesDurableStorage: () => false },
+    '@/lib/workspace-context': {},
     '@/lib/feed-catalog': catalog, 'fs/promises': mockedFs, path, crypto: require('node:crypto'),
   });
   const migrated = await realDatabase.getDb();

@@ -10,7 +10,7 @@ const ts = require('typescript');
 // No external requests, database files, or real user data are used.
 async function main() {
   const root = path.resolve(__dirname, '..');
-  const context = vm.createContext({ console, Buffer, URL, TextDecoder, AbortSignal, fetch, Request, Response, crypto: globalThis.crypto });
+  const context = vm.createContext({ process: { env: { NODE_ENV: 'test', RSS_ALLOW_PRIVATE_NETWORK: '1' } }, console, Buffer, URL, TextDecoder, AbortSignal, fetch, Request, Response, crypto: globalThis.crypto });
   function load(filename, imports = {}) {
     const source = fs.readFileSync(path.join(root, filename), 'utf8');
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText;
@@ -51,7 +51,7 @@ async function main() {
   const source = (id, endpoint = '/gzip', enabled = true) => ({ id, name: `Journal ${id}`, url: `${base}${endpoint}`, website: 'https://publisher.example', category: 'trends', language: 'fr', enabled });
   let groups = 0;
   try {
-    const rss = load('src/lib/rss.ts');
+    const rss = load('src/lib/rss.ts', { undici: { ...require('undici'), fetch: (url, options) => context.fetch(url, options) } });
     const catalog = load('src/lib/feed-catalog.ts');
     const articles = await rss.fetchFeedArticles(source('compressed'));
     assert.equal(articles.length, 1);

@@ -14,6 +14,8 @@ async function main() {
   const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'rss-notes-'));
   const context = vm.createContext({ console, Buffer, URL, Request, Response, structuredClone, setTimeout, clearTimeout, crypto, process: { cwd: () => directory, pid: process.pid, env: { RSS_DATA_DIR: directory } } });
   function load(filename, imports = {}) {
+    if (!Object.hasOwn(imports, '@/lib/durable-store') && filename !== 'src/lib/durable-store.ts') imports['@/lib/durable-store'] = load('src/lib/durable-store.ts');
+    imports['@/lib/workspace-context'] ||= { currentWorkspaceId: async () => 'owner', editorialDocumentId: async () => 'editorial', backupDocumentPrefix: async () => 'backup:', inWorkspace: (_id, operation) => operation() };
     const compiled = ts.transpileModule(fs.readFileSync(path.join(root, filename), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
     const module = { exports: {} };
     vm.runInContext(`(function(require,module,exports){${compiled}\n})`, context, { filename })(name => Object.hasOwn(imports, name) ? imports[name] : require(name), module, module.exports);

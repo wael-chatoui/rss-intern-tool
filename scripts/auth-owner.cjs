@@ -7,12 +7,7 @@ const ts = require('typescript');
 
 const root = path.resolve(__dirname, '..');
 function loadAuthStore() {
-  const filename = path.join(root, 'src/lib/auth-store.ts');
-  const source = fs.readFileSync(filename, 'utf8');
-  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText;
-  const loaded = { exports: {} };
-  new Function('require', 'module', 'exports', compiled)(require, loaded, loaded.exports);
-  return loaded.exports;
+  return require('./load-typescript.cjs')(root)('src/lib/auth-store.ts');
 }
 
 async function main() {

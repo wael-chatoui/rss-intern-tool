@@ -1,5 +1,9 @@
 import Parser from 'rss-parser';
 import { createHash } from 'crypto';
+import { lookup } from 'node:dns';
+import { isIP } from 'node:net';
+import { Agent, fetch as networkFetch } from 'undici';
+import ipaddr from 'ipaddr.js';
 import { FeedSource, RSSArticle, FeedHealth } from '@/types';
 export type { FeedHealth } from '@/types';
 
@@ -37,6 +41,30 @@ const parser = new Parser({
 
 export class FeedFetchError extends Error {}
 
+export function isPublicFeedAddress(address: string): boolean {
+  try { return ipaddr.process(address.replace(/^\[|\]$/g, '')).range() === 'unicast'; }
+  catch { return false; }
+}
+
+const publisherAgent = new Agent({ connect: {
+  lookup(hostname, options, callback) {
+    lookup(hostname, { all: true }, (error, addresses) => {
+      if (error) { callback(error, '', 4); return; }
+      if (!addresses.length || addresses.some(item => !isPublicFeedAddress(item.address))) {
+        callback(Object.assign(new Error('Private feed address denied'), { code: 'ERR_RSS_PRIVATE_ADDRESS' }), '', 4); return;
+      }
+      if (options.all) callback(null, addresses);
+      else callback(null, addresses[0].address, addresses[0].family);
+    });
+  },
+} });
+
+function validatePublisherAddress(address: URL) {
+  const hostname = address.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (!['http:', 'https:'].includes(address.protocol) || address.username || address.password) throw new FeedFetchError('adresse de flux invalide (HTTP ou HTTPS sans identifiants requis)');
+  if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || (isIP(hostname) && !isPublicFeedAddress(hostname))) throw new FeedFetchError('les sources doivent utiliser une adresse Internet publique');
+}
+
 export function feedErrorMessage(error: unknown): string {
   return error instanceof FeedFetchError ? error.message : 'connexion impossible avec la source';
 }
@@ -52,12 +80,24 @@ async function downloadFeedDocument(url: string, timeoutMs = FEED_TIMEOUT_MS) {
 
   const signal = AbortSignal.timeout(timeoutMs);
   try {
+    // Only isolated local publisher fixtures may opt out. Vercel always pins DNS
+    // to validated public addresses, including every redirect and discovery URL.
+    const localFixture = process.env.NODE_ENV === 'test' && process.env.RSS_ALLOW_PRIVATE_NETWORK === '1' && process.env.VERCEL !== '1';
     // BoF's public RSS endpoint accepts an identified RSS reader, while rejecting
     // the legacy browser header required by some other publishers such as ELLE.
     const headers = address.hostname === 'www.businessoffashion.com'
       ? { ...FEED_HEADERS, 'User-Agent': 'FashionPressHub/1.0 RSS reader' }
       : FEED_HEADERS;
-    const response = await fetch(address, { headers, signal, cache: 'no-store' });
+    let response;
+    for (let redirects = 0; ; redirects++) {
+      if (!localFixture) validatePublisherAddress(address);
+      response = await networkFetch(address, { headers, signal, redirect: 'manual', ...(localFixture ? {} : { dispatcher: publisherAgent }) });
+      if (![301, 302, 303, 307, 308].includes(response.status)) break;
+      const destination = response.headers.get('location');
+      await response.body?.cancel();
+      if (!destination || redirects >= 5) throw new FeedFetchError('trop de redirections pour cette source');
+      address = new URL(destination, address);
+    }
     if (!response.ok) {
       await response.body?.cancel();
       const reason = response.status === 403 ? 'accès refusé par la source'

@@ -3,6 +3,8 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { DatabaseSchema, FeedSource } from '@/types';
 import { FEED_URL_REPLACEMENTS } from '@/lib/feed-catalog';
+import { inDurableTransaction, readDurableDocument, usesDurableStorage, writeDurableDocument } from '@/lib/durable-store';
+import { currentWorkspaceId, editorialDocumentId, inWorkspace } from '@/lib/workspace-context';
 
 export const DATA_DIR = process.env.RSS_DATA_DIR ? path.resolve(process.env.RSS_DATA_DIR) : path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
@@ -179,6 +181,7 @@ function serializeDatabaseOperation<T>(operation: () => Promise<T>): Promise<T> 
 }
 
 async function writeDatabaseFile(data: DatabaseSchema): Promise<void> {
+  if (usesDurableStorage()) return writeDurableDocument(await editorialDocumentId(), JSON.stringify(data));
   await fs.mkdir(DATA_DIR, { recursive: true });
   const temporaryFile = path.join(DATA_DIR, `.db-${process.pid}-${randomUUID()}.tmp`);
   try {
@@ -191,7 +194,15 @@ async function writeDatabaseFile(data: DatabaseSchema): Promise<void> {
 
 async function readDatabaseFile(): Promise<DatabaseSchema> {
   try {
-    const raw = await fs.readFile(DB_FILE, 'utf-8');
+    const durable = usesDurableStorage();
+    const documentId = durable ? await editorialDocumentId() : '';
+    const raw = durable ? await readDurableDocument(documentId) : await fs.readFile(DB_FILE, 'utf-8');
+    if (raw === null) {
+      if (documentId.startsWith('editorial:member_')) return { feeds: structuredClone(DEFAULT_FEEDS), posts: [], savedArticles: [] };
+      // The remote store is initialized deliberately by the migration command.
+      // Never replace a missing or misconfigured production DB with demo data.
+      throw new Error('L’espace éditorial doit être initialisé avant utilisation.');
+    }
     const data = JSON.parse(raw) as DatabaseSchema;
     // An empty source list is an intentional user choice.
     if (!Array.isArray(data.feeds)) data.feeds = structuredClone(DEFAULT_FEEDS);
@@ -221,11 +232,15 @@ export function getDb(): Promise<DatabaseSchema> {
 }
 
 /** Apply a mutation to the latest database under the shared process lock. */
-export function updateDb<T>(mutate: (database: DatabaseSchema) => T | Promise<T>): Promise<T> {
-  return serializeDatabaseOperation(async () => {
+export async function updateDb<T>(mutate: (database: DatabaseSchema) => T | Promise<T>): Promise<T> {
+  // Resolve the session before entering the editorial write transaction. Session
+  // lookup has its own auth transaction and must never nest behind another lock.
+  const workspace = usesDurableStorage() ? await currentWorkspaceId() : 'owner';
+  const operation = async () => {
     const database = await readDatabaseFile();
     const result = await mutate(database);
     await writeDatabaseFile(database);
     return result;
-  });
+  };
+  return serializeDatabaseOperation(() => inWorkspace(workspace, () => usesDurableStorage() ? inDurableTransaction(operation) : operation()));
 }

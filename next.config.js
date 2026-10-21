@@ -3,6 +3,7 @@ const path = require('path');
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  output: 'standalone',
   distDir: process.env.RSS_BUILD_DIR || '.next',
   async headers() {
     return [
@@ -12,10 +13,9 @@ const nextConfig = {
     ];
   },
   images: {
-    remotePatterns: [
-      { protocol: 'https', hostname: '**' },
-      { protocol: 'http', hostname: '**' },
-    ],
+    // The reader renders publisher images directly. No public server-side image
+    // proxy is needed for arbitrary URLs supplied by subscribers.
+    unoptimized: true,
   },
   webpack: (config) => {
     config.resolve.alias['@'] = path.resolve(__dirname, 'src');

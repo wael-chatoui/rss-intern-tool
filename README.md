@@ -1,4 +1,4 @@
-# La rédaction
+# La Rédaction
 
 Un espace de veille RSS, de notes sourcées et de rédaction pour construire une chaîne de presse indépendante. L’interface utilise un thème clair uniquement, avec une direction éditoriale papier et vert forêt.
 
@@ -44,11 +44,13 @@ Vérification TypeScript : `npx tsc --noEmit --incremental false`.
 
 ## Technique et données
 
-Next.js 14, React 18, TypeScript, Tailwind CSS, Lucide et rss-parser. L’application stocke les sources, notes, articles sélectionnés et cache dans `data/db.json`. Les écritures sont atomiques et les mutations sont sérialisées dans le processus serveur. Ce stockage est conçu pour un usage personnel local avec un seul processus serveur.
+Next.js 15.5.28, React 18, TypeScript, Tailwind CSS, Lucide et rss-parser. Sur Vercel, les sources, notes, articles, sessions et sauvegardes utilisent une base libSQL/Turso durable. Les mutations utilisent une transaction d’écriture, y compris entre plusieurs instances serveur. Sans configuration distante, un usage personnel local reste possible avec `data/db.json` et un seul processus Node. Sur Vercel, l’absence de base durable provoque une erreur explicite, sans repli éphémère.
 
 Le cache RSS dure dix minutes. Le dernier contenu disponible s’affiche immédiatement, puis la collecte se poursuit en arrière-plan si nécessaire. La santé de chaque source est conservée après rechargement. Les collectes ciblées gardent les articles et diagnostics des autres sources. Une source indisponible conserve ses derniers articles et affiche un avertissement lors de l’actualisation. Les identifiants d’articles sont stables et distincts par source et lien ; les anciens identifiants sont migrés automatiquement. Le lecteur reconstruit les paragraphes, listes et liens HTTP(S) du flux, sans insérer son HTML brut. Le lien vers l’original reste visible dès le début de la lecture.
 
-Sur un hébergement en lecture seule comme Vercel, le cache RSS utilise la mémoire du processus si son écriture est refusée. Les articles restent consultables. Ce cache temporaire est reconstruit à la demande et ne constitue pas un stockage durable. Cette solution concerne uniquement le cache RSS : un stockage persistant reste nécessaire pour enregistrer durablement les notes et les préférences sur un hébergement serveur. Les anciennes adresses intégrées ELLE, FashionNetwork, Madame Figaro et Dazed sont migrées vers les flux officiels vérifiés. Dazed couvre désormais la mode et la culture. Les erreurs HTTP, délais et réponses invalides sont signalés par source.
+Les flux sont téléchargés avec contrôle des adresses publiques et des réponses DNS. Chaque redirection est revérifiée ; les adresses privées, locales, les métadonnées d’hébergement et les identifiants dans les URL sont refusés. Le lecteur reconstruit le texte sans injecter le HTML brut. Le proxy d’images distant est désactivé, car l’application utilise directement les images des sources.
+
+Les anciennes adresses intégrées ELLE, FashionNetwork, Madame Figaro et Dazed sont migrées vers leurs flux officiels. Les erreurs HTTP, délais et réponses invalides sont signalés par source.
 
 Tests RSS isolés : `npm run test:rss` (serveur HTTP local de test, sans données utilisateur).
 
@@ -69,30 +71,62 @@ Les notes peuvent être sélectionnées individuellement. La veille peut être e
 
 Chaque import affiche un aperçu des ajouts, mises à jour et doublons avant confirmation. Les doublons sont ignorés par défaut ; leur mise à jour doit être choisie explicitement. Les articles importés sont conservés dans **Enregistrés**. Les flux importés ne sont pas contactés pendant l’import.
 
-Une sauvegarde automatique précède chaque import et restauration. Les dix dernières sont téléchargeables dans l’onglet **Sauvegardes**. La restauration complète remplace l’état courant après confirmation, avec contrôle des modifications intervenues depuis l’aperçu. Les fichiers se trouvent dans `data/backups/` et sont exclus de Git.
+Une sauvegarde automatique précède chaque import et restauration. Les dix dernières sont téléchargeables dans l’onglet **Sauvegardes**. La restauration complète remplace l’état courant après confirmation, avec contrôle des modifications intervenues depuis l’aperçu. En mode local, les fichiers se trouvent dans `data/backups/` et sont exclus de Git. En mode distant, les sauvegardes sont stockées dans la même base durable et dans le même espace privé que leur propriétaire.
 
 JSON et les formats natifs Markdown/HTML/ZIP conservent les métadonnées éditoriales. Les PDF importés deviennent du texte : les images et la mise en page ne sont pas reprises. Les documents scannés sans texte nécessitent un OCR externe. Les caractères absents des polices d’export sont signalés et représentés par leur code Unicode.
 
 Limites : 20 Mo par fichier et par requête d’import, 10 000 enregistrements par import. Les archives sont contrôlées avant décompression. Les PDF sont limités à 500 pages et 2 millions de caractères extraits.
 
-L’application nécessite Node.js 22.13 ou ultérieur. Le worker PDF est copié localement par `predev` et `prebuild` ; aucun service de conversion externe n’est utilisé. `RSS_DATA_DIR` permet de définir un autre répertoire de données, notamment pour les tests.
+L’application nécessite Node.js 22.19 ou ultérieur. Le worker PDF est copié localement par `predev` et `prebuild` ; aucun service de conversion externe n’est utilisé. `RSS_DATA_DIR` permet de définir un autre répertoire de données, notamment pour les tests.
 
 Vérification : `npm test` (notes versionnées, brouillons, parcours d’écriture, navigation, recherche et transferts), `npm run test:rss`, `npm run test:auth`, puis `npm run build`. Les tests de transfert utilisent une base temporaire et ne modifient pas `data/db.json`.
 
 
-## Authentification et hébergement
+## Authentification, espaces privés et abonnement
 
-Un seul compte propriétaire protège l’espace existant. Les inscriptions publiques sont fermées. Toutes les API de données, y compris les sauvegardes, vérifient la session avant tout accès. La connexion utilise un cookie HttpOnly, SameSite=Lax, Secure en production, expirant après sept jours. La déconnexion révoque la session côté serveur, après l’enregistrement des notes en attente.
+Le propriétaire conserve son espace existant et ne paie pas d’abonnement. Chaque abonné possède un compte, des sessions, un document éditorial et des sauvegardes indépendants. Le serveur déduit l’espace du cookie de session opaque ; aucun identifiant fourni par le navigateur ne sélectionne un autre compte. Une nouvelle inscription ne reçoit aucune note du propriétaire ni d’un autre abonné.
 
-Les mots de passe sont dérivés avec scrypt et un sel aléatoire. Les sessions sont opaques, générées aléatoirement et stockées uniquement sous forme de condensats SHA-256. Dix tentatives de connexion sont autorisées par fenêtre de quinze minutes pour l’ensemble du compte ; la limite persiste après redémarrage. Une connexion réussie réinitialise le compteur.
+Les inscriptions sont fermées par défaut (`PUBLIC_SIGNUP_ENABLED=0`). Le paiement est fermé par défaut (`BILLING_ENABLED=0`). Avant ouverture : vérifier l’identité et les informations du vendeur, les conditions applicables à l’hébergement et une recette Stripe en mode test. Aucun tarif n’est envoyé par le navigateur : le prix autorisé est `STRIPE_PRICE_MONTHLY` côté serveur. Checkout accepte les codes promotionnels créés dans Stripe. Le portail Stripe permet de gérer l’abonnement et les factures.
 
-`data/auth.json` contient le propriétaire, ses secrets dérivés et les sessions. Ce fichier et ses temporaires sont exclus de Git et des exports éditoriaux. Les permissions de création sont 0600. Conservez-le dans un volume persistant privé. Une restauration éditoriale ne modifie pas le compte propriétaire.
+L’accès en écriture et la collecte RSS nécessitent un abonnement actif confirmé côté serveur. La consultation des notes, des articles enregistrés et l’export complet restent disponibles après résiliation, depuis `/espace` et `/compte`. Le retour d’un paiement ne donne aucun droit : seul un webhook signé, cohérent avec le compte, le produit et le mode configurés met à jour l’abonnement. Les événements rejoués ou anciens sont traités sans doublon.
 
-En production, utilisez HTTPS et configurez `AUTH_ORIGIN` avec l’origine publique exacte, par exemple `https://redaction.example.com`. Toutes les mutations exigent une origine identique. Le proxy doit contrôler les en-têtes Host et X-Forwarded-Proto. Le stockage JSON, les sauvegardes et l’authentification nécessitent un disque inscriptible et **un seul processus Node.js**. Un hébergement éphémère, plusieurs instances ou une ouverture multi-utilisateurs demandent une base de données adaptée.
+Les mots de passe sont dérivés avec scrypt et un sel aléatoire. Les sessions sont opaques, stockées sous forme de condensats SHA-256, expirent après sept jours et sont révoquées à la déconnexion. Le cookie est HttpOnly, SameSite=Lax et Secure en production. Les mutations vérifient l’origine exacte. Le compteur des échecs de connexion persiste, ainsi que la limitation des inscriptions. Les données d’authentification ne figurent jamais dans les exports éditoriaux.
 
-`RSS_DATA_DIR` s’applique aussi au stockage d’authentification et doit être identique lors de l’installation du compte et du lancement du serveur. La commande d’installation utilise TypeScript, déjà présent parmi les dépendances de développement ; installez-les avant de créer ou réinitialiser le compte.
+L’installation propriétaire sur serveur utilise un lien privé `/activation#token=…`, avec un jeton aléatoire de 32 octets. Seul son SHA-256 est configuré dans `AUTH_SETUP_TOKEN_SHA256`, accompagné de `AUTH_SETUP_EXPIRES_AT`. Le fragment ne part pas dans la requête HTTP et est retiré de l’URL dès ouverture. La création du compte consomme atomiquement la possibilité d’installation ; le lien ne peut pas remplacer un compte existant. Le propriétaire choisit lui-même son mot de passe dans le formulaire. `OWNER_RESERVED_EMAIL` peut réserver son adresse avant l’ouverture des inscriptions.
 
-Vérifications auth isolées : `npm run test:auth`. Aucun compte ni fichier de données utilisateur n’est modifié par ces tests. `RSS_BUILD_DIR` permet un répertoire de compilation séparé pour les aperçus et les tests.
+`AUTH_ORIGIN` et `APP_BASE_URL` doivent correspondre à l’origine publique exacte. Les variables attendues sont décrites dans `.env.example`. Les secrets restent uniquement dans l’environnement serveur.
 
+## Migration et restauration
 
-Références d’implémentation : [authentification Next.js 14](https://nextjs.org/docs/14/app/building-your-application/authentication), [stockage des mots de passe OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html), [gestion des sessions OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
+Une migration initiale explicite préserve les fichiers d’origine, enregistre une copie privée avant envoi, puis vérifie l’égalité complète et le SHA-256 du document migré. Elle refuse de remplacer une destination déjà initialisée :
+
+```sh
+node --env-file=.env.migration.local scripts/migrate-durable.cjs --from /chemin/prive/db.json --backup-dir /chemin/prive/sauvegardes
+```
+
+Le compte et les sauvegardes locales sont également transférés s’ils existent. Les anciens identifiants d’infrastructure et du dépôt restent inchangés. Ne placez jamais les fichiers d’authentification ou les liens d’activation dans Git.
+
+## Hébergement portable
+
+`output: standalone` et le `Dockerfile` permettent un hébergement Node 22 hors Vercel, avec le même stockage Turso. Le conteneur s’exécute sans privilèges root et les fichiers d’environnement et de données sont exclus de l’image. Aucun abonnement d’hébergement payant n’est requis par le code. Vérifiez les conditions commerciales de l’offre d’hébergement avant d’ouvrir les ventes.
+
+```sh
+docker build -t la-redaction .
+docker run --rm -p 3000:3000 --env-file /chemin/prive/production.env la-redaction
+```
+
+Le stockage JSON local demande un volume inscriptible, privé et un seul processus. Les inscriptions multi-utilisateurs nécessitent le stockage durable.
+
+## Vérification
+
+- `npm test` : notes, brouillons, navigation, recherche, formats, sauvegardes et restauration.
+- `npm run test:rss` : vrais flux HTTP locaux compressés, découverte et cache.
+- `npm run test:auth` et `npm run test:activation` : sessions et activation propriétaire à usage unique.
+- `npm run test:durable` : trois processus, concurrence, redémarrage, restauration et isolation A/B/propriétaire avec SQLite temporaire.
+- `npm run test:stripe` : Checkout idempotent, portail privé, HMAC Stripe réel, rejeux, mode, prix étrangers et résiliation, sans appel de paiement ni réseau.
+- `npm run test:security` : SSRF, DNS, IPv4/IPv6, redirections et refus des exceptions de test en production.
+- `npm run build`, puis `npm run test:production` : serveur Next compilé, cookies, API privées, abonnements, lecture et export après résiliation.
+
+Ces tests utilisent uniquement des données temporaires et ne modifient pas la base utilisateur. La démo publique `/demo` reste entièrement dans la page et ne contacte aucune API.
+
+Références : [correctifs Next.js du 14 octobre 2026](https://nextjs.org/blog/nextjs-security-update-october-14-2026), [SDK libSQL](https://docs.turso.tech/sdk/ts/reference), [webhooks Stripe](https://docs.stripe.com/webhooks), [idempotence Stripe](https://docs.stripe.com/api/idempotent_requests).

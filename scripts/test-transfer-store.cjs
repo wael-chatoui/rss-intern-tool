@@ -13,6 +13,9 @@ async function main() {
   const dataDirectory = path.join(directory, 'data');
   const context = vm.createContext({ console, Buffer, URL, Request, Response, TextEncoder, TextDecoder, structuredClone, setTimeout, clearTimeout, crypto, process: { cwd: () => directory, pid: process.pid, env: { RSS_DATA_DIR: dataDirectory } } });
   function load(filename, imports = {}) {
+    if (!Object.hasOwn(imports, '@/lib/durable-store') && filename !== 'src/lib/durable-store.ts') imports['@/lib/durable-store'] = load('src/lib/durable-store.ts');
+    imports['@/lib/billing-store'] ||= { hasWorkspaceAccess: async () => true };
+    imports['@/lib/workspace-context'] ||= { currentWorkspaceId: async () => 'owner', editorialDocumentId: async () => 'editorial', backupDocumentPrefix: async () => 'backup:', inWorkspace: (_id, operation) => operation() };
     const source = fs.readFileSync(path.join(root, filename), 'utf8');
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText;
     const module = { exports: {} };

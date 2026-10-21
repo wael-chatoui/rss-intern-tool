@@ -4,11 +4,11 @@ import { LoginForm } from '@/components/Auth/LoginForm';
 import { getCurrentOwner } from '@/lib/auth';
 import { getOwner } from '@/lib/auth-store';
 
-export const metadata: Metadata = { title: 'Connexion | La rédaction', robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: 'Connexion | La Rédaction', robots: { index: false, follow: false } };
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export default async function Login({ searchParams }: { searchParams: { expired?: string } }) {
+export default async function Login({ searchParams }: { searchParams: Promise<{ expired?: string }> }) {
   if (await getCurrentOwner()) redirect('/espace');
-  return <LoginForm configured={!!await getOwner()} expired={searchParams.expired === '1'} />;
+  return <LoginForm configured={!!await getOwner() || process.env.PUBLIC_SIGNUP_ENABLED === '1'} expired={(await searchParams).expired === '1'} signupEnabled={process.env.PUBLIC_SIGNUP_ENABLED === '1'} />;
 }

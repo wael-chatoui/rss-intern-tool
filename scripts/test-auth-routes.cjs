@@ -60,7 +60,7 @@ function harness() {
     return module.exports;
   }
   const auth = load('src/lib/auth.ts', {
-    '@/lib/auth-store': store, 'next/server': { NextResponse },
+    '@/lib/auth-store': store, '@/lib/billing-store': { hasWorkspaceAccess: async () => true }, 'next/server': { NextResponse },
     'next/headers': { cookies: () => ({ get: name => name === AUTH_COOKIE ? { value: SESSION_TOKEN } : undefined }) },
   });
   const imports = { '@/lib/auth-store': store, '@/lib/auth': auth, 'next/server': { NextResponse } };

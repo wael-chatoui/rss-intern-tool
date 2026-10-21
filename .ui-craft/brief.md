@@ -1,4 +1,4 @@
-# La rédaction
+# La Rédaction
 
 ## Product
 Espace de travail personnel pour construire une chaîne de presse indépendante : lire ses sources RSS, conserver les informations, prendre des notes sourcées, rédiger et organiser la publication.

@@ -7,7 +7,7 @@
 /coverage
 
 # next.js
-/.next/
+/.next*/
 /out/
 
 # production
@@ -41,3 +41,5 @@ next-env.d.ts
 /data/auth.json
 /data/.auth-*.tmp
 /.next-auth-preview/
+.env*
+!.env.example

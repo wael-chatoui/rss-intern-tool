@@ -21,7 +21,11 @@ async function main() {
     const context = vm.createContext({ Buffer, Date: TestDate, console, process: { cwd: () => temporary, pid: process.pid, env: { RSS_DATA_DIR: dataDirectory } } });
     const loaded = { exports: {} };
     const wrapper = vm.runInContext(`(function(require, module, exports) { ${compiled}\n})`, context, { filename });
-    wrapper(require, loaded, loaded.exports);
+    const durableFilename = path.resolve(__dirname, '../src/lib/durable-store.ts');
+    const durableCompiled = ts.transpileModule(fs.readFileSync(durableFilename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText;
+    const durable = { exports: {} };
+    vm.runInContext(`(function(require,module,exports){${durableCompiled}\n})`, context)(require, durable, durable.exports);
+    wrapper(name => name === '@/lib/durable-store' ? durable.exports : require(name), loaded, loaded.exports);
     return loaded.exports;
   }
   const plain = value => JSON.parse(JSON.stringify(value));

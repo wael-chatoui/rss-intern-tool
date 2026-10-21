@@ -1,0 +1,7 @@
+import type { Metadata } from 'next';
+import { LegalPage } from '@/components/Marketing/LegalPage';
+
+export const metadata: Metadata = { title: 'Mentions légales | La Rédaction' };
+export default function LegalNotice() {
+  return <LegalPage title="Mentions légales"><h2>Éditeur</h2><p>La Rédaction est éditée par Chatoui Wael, entrepreneur individuel, exerçant une activité de développement informatique et de prestation de services.</p><p>SIREN : 994 449 031<br />SIRET : 994 449 031 00016</p><p>Adresse professionnelle : 14 rue du Lavoir, 40990 Saint-Paul-lès-Dax, France.</p>{process.env.SUPPORT_EMAIL && <p>Contact : <a href={`mailto:${process.env.SUPPORT_EMAIL}`}>{process.env.SUPPORT_EMAIL}</a>.</p>}<p>Directeur de la publication : Wael Chatoui.</p><h2>Hébergement</h2><p>L’application est hébergée par <a href="https://vercel.com" target="_blank" rel="noopener noreferrer">Vercel</a>. Le stockage durable de l’espace éditorial utilise Turso, dans la région Europe Ouest (Irlande).</p><h2>État du service</h2><p>La démonstration est accessible sans inscription. L’ouverture des inscriptions et des abonnements fait l’objet d’une activation distincte. Aucun abonnement n’est commercialisé tant que le parcours de paiement n’est pas ouvert.</p><h2>Contenus et sources</h2><p>Les articles RSS et les visuels restent la propriété de leurs auteurs et éditeurs respectifs. Les liens vers les sources originales sont conservés. L’utilisateur reste responsable de ses textes, des vérifications et des droits nécessaires à leur réutilisation.</p></LegalPage>;
+}

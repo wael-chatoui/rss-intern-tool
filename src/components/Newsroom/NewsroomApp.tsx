@@ -327,7 +327,7 @@ export default function NewsroomApp({ owner }: { owner: Owner }) {
     <a className="skip-link" href="#main">Aller au contenu</a>
     {mobileMenu && <button className="sidebar-scrim" aria-label="Fermer la navigation" onClick={() => setMobileMenu(false)} />}
     <aside ref={sidebarRef} className={`sidebar ${mobileMenu ? 'is-open' : ''}`} aria-label="Navigation principale" role={mobileMenu ? 'dialog' : undefined} aria-modal={mobileMenu ? true : undefined} tabIndex={mobileMenu ? -1 : undefined}>
-      <a className="brand" href="#main" onClick={event => { event.preventDefault(); go('veille'); }}><span className="brand-mark">r.</span><span className="brand-name">La rédaction</span></a>
+      <a className="brand" href="#main" onClick={event => { event.preventDefault(); go('veille'); }}><span className="brand-mark">r.</span><span className="brand-name">La Rédaction</span></a>
       <span className="nav-label">NAVIGATION</span>
       <nav>{([
         { id: 'veille', label: 'Veille RSS', icon: Newspaper, count: unread },

@@ -2,6 +2,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { DATA_DIR, getDb, updateDb } from '@/lib/db';
+import { listDurableBackups, readDurableDocument, removeDurableBackup, usesDurableStorage, writeDurableDocument } from '@/lib/durable-store';
+import { backupDocumentPrefix } from '@/lib/workspace-context';
 import { createArticleId } from '@/lib/rss';
 import { getNoteSources, nextNoteRevision, noteRevision, rememberNoteRevision, validateNoteSources, NoteValidationError, withNoteSources } from '@/lib/note-model';
 import type { TransferData } from '@/lib/transfer-formats';
@@ -460,6 +462,7 @@ function importPlan(database: DatabaseSchema, rawData: unknown, mode: ImportMode
 }
 
 export async function listTransferBackups(): Promise<BackupInfo[]> {
+  if (usesDurableStorage()) return (await listDurableBackups(await backupDocumentPrefix())).filter(item => BACKUP_NAME.test(item.id)).map(item => ({ ...item, createdAt: new Date(Number(BACKUP_NAME.exec(item.id)![1])).toISOString() }));
   let filenames: string[];
   try { filenames = await fs.readdir(BACKUP_DIRECTORY); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
@@ -481,6 +484,10 @@ async function createAutomaticBackup(database: DatabaseSchema): Promise<BackupIn
   const createdAt = new Date().toISOString();
   const id = `auto-${Date.parse(createdAt)}-${randomUUID()}.json`;
   const text = JSON.stringify(snapshotDatabase(database), null, 2);
+  if (usesDurableStorage()) {
+    await writeDurableDocument(`${await backupDocumentPrefix()}${id}`, text);
+    return { id, createdAt, size: Buffer.byteLength(text, 'utf8') };
+  }
   await fs.mkdir(BACKUP_DIRECTORY, { recursive: true });
   const temporaryFile = path.join(BACKUP_DIRECTORY, `.${id}.tmp`);
   try {
@@ -491,6 +498,11 @@ async function createAutomaticBackup(database: DatabaseSchema): Promise<BackupIn
 }
 export async function readTransferBackup(id: string): Promise<{ id: string; text: string }> {
   if (path.basename(id) !== id || !BACKUP_NAME.test(id)) throw new TransferError('Identifiant de sauvegarde invalide.');
+  if (usesDurableStorage()) {
+    const text = await readDurableDocument(`${await backupDocumentPrefix()}${id}`);
+    if (text === null) throw new TransferError('Sauvegarde introuvable.', 404);
+    return { id, text };
+  }
   const filename = path.join(BACKUP_DIRECTORY, id);
   try {
     const stat = await fs.lstat(filename);
@@ -522,7 +534,8 @@ export async function applyTransferImport(data: unknown, mode: ImportMode, dupli
   let backups: BackupInfo[] = [result.backup];
   try {
     backups = await listTransferBackups();
-    await Promise.all(backups.slice(10).map(backup => fs.rm(path.join(BACKUP_DIRECTORY, backup.id), { force: true })));
+    const prefix = usesDurableStorage() ? await backupDocumentPrefix() : '';
+    await Promise.all(backups.slice(10).map(backup => usesDurableStorage() ? removeDurableBackup(backup.id, prefix) : fs.rm(path.join(BACKUP_DIRECTORY, backup.id), { force: true })));
     backups = backups.slice(0, 10);
   } catch {
     result.preview.warnings.push('Import effectué. Le nettoyage des anciennes sauvegardes n’a pas pu être terminé.');

@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'La rédaction | Veille, notes et presse indépendante',
+  title: 'La Rédaction | Veille, notes et presse indépendante',
   description: 'Votre espace de veille RSS, de notes sourcées et de rédaction pour une presse indépendante.',
 };
 

@@ -35,7 +35,7 @@ export async function POST(request: Request) {
     }
     const owner = await authenticateOwner(body.email, body.password);
     if (!owner) return NextResponse.json({ error: 'L’e-mail ou le mot de passe est incorrect.' }, { status: 401, headers: PRIVATE_HEADERS });
-    const session = await createSession();
+    const session = await createSession(owner);
     const response = NextResponse.json({ user: owner }, { headers: PRIVATE_HEADERS });
     response.cookies.set(AUTH_COOKIE, session.token, { ...sessionCookieOptions(), maxAge: SESSION_TTL_SECONDS, expires: new Date(session.expiresAt) });
     return response;

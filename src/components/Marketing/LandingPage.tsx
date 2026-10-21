@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { ArrowRight, ArrowUpRight } from 'lucide-react';
 import './marketing.css';
 
-export function LandingPage({ signedIn = false }: { signedIn?: boolean }) {
+export function LandingPage({ signedIn = false, signupEnabled = false, billingEnabled = false }: { signedIn?: boolean; signupEnabled?: boolean; billingEnabled?: boolean }) {
   const workspaceHref = signedIn ? '/espace' : '/connexion';
 
   return (
@@ -10,9 +10,9 @@ export function LandingPage({ signedIn = false }: { signedIn?: boolean }) {
       <a className="skip-link" href="#contenu">Aller au contenu</a>
 
       <header className="marketing-header marketing-container">
-        <Link href="/" className="marketing-brand" aria-label="La rédaction, accueil">
+        <Link href="/" className="marketing-brand" aria-label="La Rédaction, accueil">
           <span className="marketing-brand-mark" aria-hidden="true">r.</span>
-          <span>La rédaction</span>
+          <span>La Rédaction</span>
         </Link>
         <nav className="marketing-nav" aria-label="Navigation principale">
           <a href="#fonctionnalites" className="marketing-nav-features">Fonctionnalités</a>
@@ -28,17 +28,18 @@ export function LandingPage({ signedIn = false }: { signedIn?: boolean }) {
           <div className="marketing-hero-copy">
             <h1 id="landing-title">De la veille<br />à la rédaction.</h1>
             <p>Rassemblez vos sources RSS, conservez les articles utiles et préparez vos textes dans un même espace.</p>
-            <Link href={workspaceHref} className="marketing-primary-link">
-              Ouvrir mon espace
+            <Link href={signedIn ? workspaceHref : signupEnabled ? '/inscription' : '/demo'} className="marketing-primary-link">
+              {signedIn ? 'Ouvrir mon espace' : signupEnabled ? 'Créer mon espace privé' : 'Essayer la démonstration'}
               <ArrowRight aria-hidden="true" />
             </Link>
+            {signupEnabled && <Link href="/demo" className="marketing-demo-link">Essayer sans compte<ArrowUpRight aria-hidden="true" /></Link>}
           </div>
 
           <figure className="marketing-product">
             <div className="marketing-product-window">
               <div className="marketing-product-bar" aria-hidden="true">
                 <span className="marketing-product-dots"><i /><i /><i /></span>
-                <span>La rédaction</span>
+                <span>La Rédaction</span>
                 <span className="marketing-product-bar-spacer" />
               </div>
               <div className="marketing-product-crop">
@@ -48,7 +49,7 @@ export function LandingPage({ signedIn = false }: { signedIn?: boolean }) {
                   src="/images/newsroom-preview.jpg"
                   width="1440"
                   height="1000"
-                  alt="L’espace de veille de La rédaction, avec les sources RSS, les articles et le carnet de notes."
+                  alt="L’espace de veille de La Rédaction, avec les sources RSS, les articles et le carnet de notes."
                   fetchPriority="high"
                 />
               </div>
@@ -59,7 +60,6 @@ export function LandingPage({ signedIn = false }: { signedIn?: boolean }) {
 
         <section id="fonctionnalites" className="marketing-workflow marketing-container" aria-labelledby="workflow-title">
           <div className="marketing-section-intro">
-            <p className="marketing-eyebrow">Le travail éditorial</p>
             <h2 id="workflow-title">Lire, noter,<br />préparer.</h2>
             <p>De l’article repéré au sujet à rédiger, gardez vos sources à portée de main.</p>
           </div>
@@ -110,9 +110,18 @@ export function LandingPage({ signedIn = false }: { signedIn?: boolean }) {
           </div>
         </section>
 
+        {billingEnabled && <section className="marketing-offer marketing-container" aria-labelledby="offer-title">
+          <div><h2 id="offer-title">Un espace privé<br />pour votre rédaction.</h2><p>Sources RSS, notes multisources, planning et exports, dans un seul abonnement.</p></div>
+          <div className="marketing-offer-details"><p className="marketing-offer-price">5,90 €<span>par mois</span></p><p>Abonnement mensuel. Annulation depuis votre compte. Après résiliation, vos données restent consultables et exportables.</p><Link className="marketing-primary-link" href={signedIn ? '/compte' : '/inscription'}>{signedIn ? 'Mon abonnement' : 'Créer mon espace'}<ArrowRight aria-hidden="true" /></Link><p className="marketing-offer-terms">Les éventuelles taxes et le total sont précisés avant paiement.</p></div>
+        </section>}
+
         <section className="marketing-faq marketing-container" aria-labelledby="faq-title">
           <h2 id="faq-title">Quelques précisions.</h2>
           <div className="marketing-faq-list">
+            <details>
+              <summary>Mes notes sont-elles privées ?<span aria-hidden="true" className="marketing-faq-plus" /></summary>
+              <p>Chaque compte possède son propre espace de sources, d’articles et de notes. Vos contenus ne sont pas visibles depuis le compte d’un autre abonné.</p>
+            </details>
             <details>
               <summary>Puis-je ajouter mes propres sources ?<span aria-hidden="true" className="marketing-faq-plus" /></summary>
               <p>Oui. Ajoutez l’adresse d’un flux RSS dans « Mes sources ». Vous pouvez ensuite le mettre en pause ou le retirer. Un fichier OPML permet aussi d’importer plusieurs sources.</p>
@@ -130,16 +139,17 @@ export function LandingPage({ signedIn = false }: { signedIn?: boolean }) {
 
         <section className="marketing-start marketing-container" aria-labelledby="start-title">
           <h2 id="start-title">Votre prochain sujet<br />commence ici.</h2>
-          <Link href={workspaceHref} className="marketing-start-link">
-            Ouvrir mon espace
+          <Link href={signedIn ? workspaceHref : signupEnabled ? '/inscription' : '/demo'} className="marketing-start-link">
+            {signedIn ? 'Ouvrir mon espace' : signupEnabled ? 'Créer mon espace privé' : 'Essayer sans compte'}
             <ArrowRight aria-hidden="true" />
           </Link>
         </section>
       </main>
 
       <footer className="marketing-footer marketing-container">
-        <span className="marketing-footer-brand">La rédaction</span>
+        <span className="marketing-footer-brand">La Rédaction</span>
         <p>Veille RSS, notes et planning éditorial.</p>
+        <nav aria-label="Informations légales"><Link href="/mentions-legales">Mentions légales</Link><Link href="/conditions">Conditions</Link><Link href="/confidentialite">Confidentialité</Link></nav>
         <a href="#contenu">Retour en haut <span aria-hidden="true">↑</span></a>
       </footer>
     </div>

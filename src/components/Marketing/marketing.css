@@ -314,3 +314,14 @@
 @media (prefers-reduced-motion: reduce) {
   .marketing-page *, .marketing-page *::before, .marketing-page *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
+.marketing-demo-link { display: inline-flex; align-items: center; gap: .5rem; margin-block-start: 1.5rem; color: var(--brand); font-size: .875rem; min-height: 2.75rem; text-underline-offset: .2em; }
+.marketing-demo-link svg { width: 1rem; height: 1rem; }
+.marketing-offer { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(2rem, 7vw, 7rem); padding-block: 5rem; border-block-end: 1px solid var(--line); }
+.marketing-offer h2 { margin-block-end: 1.5rem; }
+.marketing-offer p { line-height: 1.75; max-width: 50ch; }
+.marketing-offer-price { font: 400 3.5rem/1 var(--font-display); margin-block-end: 1.5rem; color: var(--ink); }
+.marketing-offer-price span { font: 400 1rem/1.5 var(--font-body); margin-inline-start: .75rem; color: var(--ink-muted); }
+.marketing-offer .marketing-primary-link { margin-block: 1.5rem; }
+.marketing-offer .marketing-offer-terms { font-size: .8125rem; color: var(--ink-muted); }
+.marketing-footer nav { display: flex; flex-wrap: wrap; gap: .75rem 1.25rem; font-size: .75rem; }
+@media (max-width: 750px) { .marketing-offer { grid-template-columns: 1fr; padding-block: 3rem; }.marketing-demo-link { display: flex; width: max-content; } }

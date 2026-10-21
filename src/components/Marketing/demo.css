@@ -1,0 +1,38 @@
+.demo-page { width: min(100% - 3rem, 74rem); margin-inline: auto; padding-block: 2rem 3rem; }
+.demo-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1.5rem; }
+.demo-intro { max-width: 48rem; margin-block: 4rem 2.5rem; }
+.demo-intro h1 { font: 400 clamp(2.5rem, 5vw, 4rem)/1.05 var(--font-display); letter-spacing: -.03em; }
+.demo-intro p { line-height: 1.75; color: var(--ink-muted); max-width: 65ch; margin-block-start: 1.5rem; }
+.demo-workspace { display: grid; grid-template-columns: 15rem minmax(0, 1fr); border: 1px solid var(--line); background: var(--surface); border-radius: 12px; overflow: hidden; min-height: 34rem; }
+.demo-navigation { background: var(--surface-muted); padding: 1.5rem .75rem; display: flex; flex-direction: column; gap: .5rem; }
+.demo-navigation button { display: flex; align-items: center; gap: .75rem; padding: 1rem; min-height: 3rem; font-size: .875rem; text-align: start; border-radius: 6px; }
+.demo-navigation button svg { width: 1.125rem; height: 1.125rem; flex: none; }
+.demo-navigation button:hover { background: var(--brand-soft); }
+.demo-navigation button.active { color: var(--brand); background: var(--brand-soft); font-weight: 600; }
+.demo-canvas { padding: clamp(1.5rem, 4vw, 3.5rem); min-width: 0; }
+.demo-canvas h2 { font: 400 clamp(1.75rem, 3vw, 2.5rem)/1.15 var(--font-display); letter-spacing: -.02em; overflow-wrap: anywhere; margin-block-end: 1.5rem; }
+.demo-reading { max-width: 65ch; }
+.demo-reading > p:not(.demo-source-label), .demo-empty p, .demo-plan > p { line-height: 1.75; margin-block: 1.25rem; }
+.demo-reading .btn { margin-block-start: 1rem; }
+.demo-source-label { color: var(--ink-muted); font-size: .875rem; margin-block-end: 1.5rem; }
+.demo-editor > label { display: block; font-size: .875rem; font-weight: 600; margin-block: 1.5rem .625rem; }
+.demo-editor > label:first-child { margin-block-start: 0; }
+.demo-editor .field { font-size: 1rem; }
+.demo-editor .demo-title { font: 400 1.75rem/1.25 var(--font-display); }
+.demo-editor textarea { resize: vertical; min-height: 10rem; line-height: 1.75; }
+.demo-reference { padding: 1.25rem; background: var(--surface-muted); border-radius: 6px; margin-block: 1.5rem; }
+.demo-reference strong, .demo-reference span { font-size: .8125rem; }
+.demo-reference p { margin-block: .5rem; }
+.demo-reference span { color: var(--ink-muted); }
+.demo-editor-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; margin-block-start: 1.5rem; }
+.demo-plan-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-block: 2rem; }
+.demo-plan-fields label { font-size: .875rem; font-weight: 600; }
+.demo-plan-fields .field { margin-block-start: .625rem; font-size: 1rem; min-height: 3rem; }
+.demo-planned-result { background: var(--brand-soft); padding: 1.25rem; color: var(--brand); border-radius: 6px; }
+.demo-foot { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between; margin-block: 1rem 3rem; color: var(--ink-muted); font-size: .875rem; }
+.demo-footer { padding-block: 2rem; border-block-start: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 1rem 3rem; justify-content: space-between; }
+.demo-footer p { max-width: 50ch; }
+.demo-footer a { display: inline-flex; align-items: center; gap: .75rem; color: var(--brand); text-underline-offset: .2em; }
+.demo-footer svg { width: 1.125rem; height: 1.125rem; }
+@media (max-width: 750px) { .demo-workspace { grid-template-columns: 1fr; }.demo-navigation { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: .5rem; gap: .25rem; }.demo-navigation button { flex-direction: column; text-align: center; justify-content: center; white-space: normal; padding: .75rem .25rem; font-size: .8125rem; line-height: 1.5; }.demo-plan-fields { grid-template-columns: 1fr; }.demo-intro { margin-block-start: 3rem; }.demo-header .brand-name { font-size: 1.125rem; } }
+@media (max-width: 420px) { .demo-page { width: min(100% - 2rem, 74rem); }.demo-header .btn { width: 100%; justify-content: center; }.demo-editor-actions .btn { width: 100%; justify-content: center; } }
