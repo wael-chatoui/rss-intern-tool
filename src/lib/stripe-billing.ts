@@ -6,11 +6,40 @@ import { inDurableTransaction, readDurableDocument, writeDurableDocument } from 
 import { BillingError, billingConfiguration, stripeClient } from '@/lib/stripe';
 
 const APPLICATION = 'la-redaction';
-type CheckoutAttempt = { key: string; expiresAt: number; sessionId?: string; url?: string };
+type CheckoutAttempt = { key: string; expiresAt: number; configuration?: string; sessionId?: string; url?: string };
+
+function isMonthlyPrice(price: Stripe.Price, mode: string): boolean {
+  const product = price.product;
+  return price.active && price.livemode === (mode === 'live') && price.currency === 'eur'
+    && price.unit_amount === 590 && price.type === 'recurring' && price.billing_scheme === 'per_unit'
+    && price.recurring?.interval === 'month' && price.recurring.interval_count === 1
+    && price.recurring.usage_type === 'licensed' && price.tax_behavior === 'inclusive'
+    && typeof product !== 'string' && !product.deleted && product.active
+    && product.metadata.application === APPLICATION;
+}
+
+function ownsCheckout(session: Stripe.Checkout.Session, memberId: string, customerId: string): boolean {
+  const customer = typeof session.customer === 'string' ? session.customer : session.customer?.id;
+  return customer === customerId && session.client_reference_id === memberId
+    && session.metadata?.application === APPLICATION && session.metadata.memberId === memberId;
+}
+
+function isCurrentCheckout(session: Stripe.Checkout.Session, config: ReturnType<typeof billingConfiguration>): boolean {
+  const items = session.line_items;
+  const item = items?.data[0];
+  return session.mode === 'subscription' && session.livemode === (config.mode === 'live')
+    && session.allow_promotion_codes === true && session.automatic_tax?.enabled === false
+    && session.success_url === `${config.origin}/compte?retour=succes`
+    && session.cancel_url === `${config.origin}/compte?retour=annulation`
+    && !!items && !items.has_more && items.data.length === 1 && item?.quantity === 1
+    && item.price?.id === config.price;
+}
 
 export async function createSubscriptionCheckout(account: Owner, stripe = stripeClient()): Promise<string> {
   const config = billingConfiguration();
   if (!config.enabled || !account.id) throw new BillingError('Les abonnements ne sont pas encore ouverts.');
+  const price = await stripe.prices.retrieve(config.price, { expand: ['product'] });
+  if (!isMonthlyPrice(price, config.mode)) throw new BillingError('Le tarif d’abonnement doit être vérifié avant tout paiement.');
   const billing = await getAccountBilling(account.id);
   let customerId = billing?.customerId;
   if (!customerId) {
@@ -22,23 +51,38 @@ export async function createSubscriptionCheckout(account: Owner, stripe = stripe
   const subscriptions = await stripe.subscriptions.list({ customer: customerId, status: 'all', limit: 100 });
   if (subscriptions.data.some(subscription => subscription.metadata.application === APPLICATION && !['canceled', 'incomplete_expired'].includes(subscription.status))) throw new BillingError('Un abonnement existe déjà. Gérez-le depuis « Mon abonnement et mes factures ».', 409);
   const checkoutId = `checkout:${billingMode()}:${account.id}`;
+  const configuration = JSON.stringify({ price: config.price, customerId, origin: config.origin, promotions: true, automaticTax: false });
   const previousRaw = await readDurableDocument(checkoutId);
   if (previousRaw) {
     const previous = JSON.parse(previousRaw) as CheckoutAttempt;
     if (previous.sessionId) {
-      const session = await stripe.checkout.sessions.retrieve(previous.sessionId);
+      const session = await stripe.checkout.sessions.retrieve(previous.sessionId, { expand: ['line_items.data.price'] });
+      if (!ownsCheckout(session, account.id, customerId)) throw new BillingError('La session de paiement ne correspond pas à votre compte.', 409);
       if (session.status === 'complete') throw new BillingError('Votre paiement a déjà été reçu. La confirmation de votre abonnement est en cours.', 409);
-      if (session.status === 'open' && session.url) return session.url;
+      if (session.status === 'open' && session.url && isCurrentCheckout(session, config)) return session.url;
+      if (session.status === 'open') await stripe.checkout.sessions.expire(session.id);
+      await inDurableTransaction(async () => {
+        const current = await readDurableDocument(checkoutId);
+        if (current && (JSON.parse(current) as CheckoutAttempt).key === previous.key) await writeDurableDocument(checkoutId, JSON.stringify({ ...previous, expiresAt: 0 }));
+      });
+    } else if (previous.expiresAt > Date.now() && previous.configuration !== configuration) {
+      throw new BillingError('Un paiement est en cours de préparation. Réessayez plus tard.', 409);
     }
   }
   const attempt = await inDurableTransaction(async () => {
     const raw = await readDurableDocument(checkoutId);
     const previous = raw ? JSON.parse(raw) as CheckoutAttempt : null;
-    if (previous && previous.expiresAt > Date.now() && !previous.sessionId) return previous;
-    const pending: CheckoutAttempt = { key: randomUUID(), expiresAt: Date.now() + 60 * 60 * 1000 };
+    if (previous && previous.expiresAt > Date.now() && previous.configuration === configuration) return previous;
+    const pending: CheckoutAttempt = { key: randomUUID(), configuration, expiresAt: Date.now() + 60 * 60 * 1000 };
     await writeDurableDocument(checkoutId, JSON.stringify(pending));
     return pending;
   });
+  // Another request may have finished while this request acquired the lock.
+  if (attempt.sessionId) {
+    const current = await stripe.checkout.sessions.retrieve(attempt.sessionId, { expand: ['line_items.data.price'] });
+    if (ownsCheckout(current, account.id, customerId) && current.status === 'open' && current.url && isCurrentCheckout(current, config)) return current.url;
+    throw new BillingError('La session de paiement vient de changer. Rechargez votre compte avant de réessayer.', 409);
+  }
   const session = await stripe.checkout.sessions.create({
     mode: 'subscription', customer: customerId,
     line_items: [{ price: config.price, quantity: 1 }],
@@ -46,6 +90,7 @@ export async function createSubscriptionCheckout(account: Owner, stripe = stripe
     metadata: { application: APPLICATION, memberId: account.id },
     subscription_data: { metadata: { application: APPLICATION, memberId: account.id } },
     allow_promotion_codes: true,
+    automatic_tax: { enabled: false },
     success_url: `${config.origin}/compte?retour=succes`,
     cancel_url: `${config.origin}/compte?retour=annulation`,
     expires_at: Math.floor(attempt.expiresAt / 1000),
@@ -84,18 +129,21 @@ export async function synchronizeStripeEvent(event: Stripe.Event, stripe = strip
   // Use Stripe's current state for out-of-order deliveries, rather than granting
   // access from a stale checkout success or an old subscription snapshot.
   const observedAt = Date.now();
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId, { expand: ['items.data.price.product'] });
   if (subscription.metadata.application !== APPLICATION) return 'ignored';
   const memberId = subscription.metadata.memberId;
   if (!/^member_[a-f0-9-]{36}$/.test(memberId || '')) return 'ignored';
   const customerId = typeof subscription.customer === 'string' ? subscription.customer : subscription.customer.id;
   if (await memberIdForCustomer(customerId) !== memberId) throw new BillingError('Le compte de l’abonnement ne correspond pas au client.', 400);
-  const allowedPrices = new Set([config.price, ...(process.env.STRIPE_ALLOWED_PRICE_IDS || '').split(',').filter(Boolean)]);
-  if (!subscription.items.data.some(item => allowedPrices.has(item.price.id))) return 'ignored';
+  const item = subscription.items.data[0];
+  const eligible = subscription.livemode === (config.mode === 'live') && !subscription.items.has_more
+    && subscription.items.data.length === 1 && item?.quantity === 1
+    && item.price.id === config.price && isMonthlyPrice(item.price, config.mode)
+    && subscription.automatic_tax?.enabled === false;
   const periodEnd = Math.max(0, ...subscription.items.data.map(item => item.current_period_end || 0));
   await inDurableTransaction(async () => {
     if (await readDurableDocument(eventId)) return;
-    await setAccountBilling({ memberId, customerId, subscriptionId: subscription.id, status: subscription.status, currentPeriodEnd: periodEnd, cancelAtPeriodEnd: subscription.cancel_at_period_end, lastEventCreated: event.created, lastEventId: event.id, lastObservedAt: observedAt });
+    await setAccountBilling({ memberId, customerId, subscriptionId: subscription.id, status: eligible || subscription.status === 'canceled' ? subscription.status : 'invalid_price', currentPeriodEnd: periodEnd, cancelAtPeriodEnd: subscription.cancel_at_period_end, lastEventCreated: event.created, lastEventId: event.id, lastObservedAt: observedAt });
     await writeDurableDocument(eventId, JSON.stringify({ type: event.type, created: event.created, processedAt: new Date().toISOString() }));
   });
   return 'processed';
