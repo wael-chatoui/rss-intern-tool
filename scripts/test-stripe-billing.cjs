@@ -6,7 +6,7 @@ const Stripe = require('stripe');
 
 async function main() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'redaction-stripe-'));
-  Object.assign(process.env, { TURSO_DATABASE_URL: `file:${path.join(directory, 'billing.sqlite')}`, TURSO_AUTH_TOKEN: '', VERCEL: '', STRIPE_SECRET_KEY: 'sk_test_isolated_fixture_only', STRIPE_MODE: 'test', STRIPE_PRICE_MONTHLY: 'price_fixture', APP_BASE_URL: 'http://localhost:3206', AUTH_ORIGIN: 'http://localhost:3206', BILLING_ENABLED: '1', STRIPE_WEBHOOK_SECRET: 'whsec_isolated_fixture_only' });
+  Object.assign(process.env, { TURSO_DATABASE_URL: `file:${path.join(directory, 'billing.sqlite')}`, TURSO_AUTH_TOKEN: '', VERCEL: '', STRIPE_SECRET_KEY: 'sk_test_isolated_fixture_only', STRIPE_MODE: 'test', STRIPE_PRICE_MONTHLY: 'price_fixture', APP_BASE_URL: 'https://redaction.example.test', AUTH_ORIGIN: 'https://redaction.example.test', BILLING_TERMS_URL: 'https://redaction.example.test/conditions', BILLING_PRIVACY_URL: 'https://redaction.example.test/confidentialite', BILLING_ENABLED: '1', STRIPE_WEBHOOK_SECRET: 'whsec_isolated_fixture_only' });
   const load = require('./load-typescript.cjs')();
   const auth = load('src/lib/auth-store.ts'); const billing = load('src/lib/billing-store.ts');
   const service = load('src/lib/stripe-billing.ts'); const stripeModule = load('src/lib/stripe.ts');
@@ -47,24 +47,26 @@ async function main() {
     assert.equal(calls.checkouts[0].params.subscription_data.metadata.memberId, first.id);
     assert.equal(calls.checkouts[0].params.allow_promotion_codes, true);
     assert.equal(calls.checkouts[0].params.automatic_tax.enabled, false);
-    assert.equal(calls.checkouts[0].params.success_url, 'http://localhost:3206/compte?retour=succes');
+    assert.deepEqual(calls.checkouts[0].params.consent_collection, { terms_of_service: 'required' });
+    assert.equal(calls.checkouts[0].params.custom_text.terms_of_service_acceptance.message, stripeModule.checkoutConsentConfiguration('https://redaction.example.test').message);
+    assert.equal(calls.checkouts[0].params.success_url, 'https://redaction.example.test/compte?retour=succes');
     assert.equal(await billing.memberIdForCustomer('cus_fixtureA'), first.id);
     assert.equal(await billing.hasWorkspaceAccess(first), false, 'return URL and checkout creation cannot grant access');
     await assert.rejects(service.createBillingPortal(second, stripe), /Aucun abonnement/);
     assert.match(await service.createBillingPortal(first, stripe), /^https:\/\/billing.stripe.com/);
     assert.equal(calls.portals[0].customer, 'cus_fixtureA');
-    for (const alter of [session => { session.line_items.data[0].price.id = 'price_old1900'; }, session => { session.allow_promotion_codes = false; }, session => { session.line_items.data[0].quantity = 2; }, session => { session.livemode = true; }, session => { session.automatic_tax.enabled = true; }]) {
+    for (const alter of [session => { session.line_items.data[0].price.id = 'price_old1900'; }, session => { session.allow_promotion_codes = false; }, session => { session.line_items.data[0].quantity = 2; }, session => { session.livemode = true; }, session => { session.automatic_tax.enabled = true; }, session => { delete session.consent_collection; }, session => { session.custom_text.terms_of_service_acceptance.message = 'Anciennes conditions'; }]) {
       const previous = [...checkoutByKey.values()].find(session => session.status === 'open');
       alter(previous);
       const replacement = await service.createSubscriptionCheckout(first, stripe);
       assert.notEqual(replacement, previous.url);
       assert.equal(previous.status, 'expired');
     }
-    assert.equal(calls.expired.length, 5, 'obsolete checkout sessions are expired, never reused');
+    assert.equal(calls.expired.length, 7, 'obsolete checkout sessions, including ones without consent or current legal links, are expired');
     const ownSession = [...checkoutByKey.values()].find(session => session.status === 'open');
     ownSession.metadata.memberId = second.id;
     await assert.rejects(service.createSubscriptionCheckout(first, stripe), /correspond pas/);
-    assert.equal(calls.expired.length, 5, 'foreign checkout must never be expired');
+    assert.equal(calls.expired.length, 7, 'foreign checkout must never be expired');
     ownSession.metadata.memberId = first.id;
 
     currentSubscription = { id: 'sub_fixtureA', object: 'subscription', metadata: { application: 'la-redaction', memberId: first.id }, customer: 'cus_fixtureA', status: 'active', livemode: false, automatic_tax: { enabled: false }, cancel_at_period_end: false, items: { has_more: false, data: [{ price: structuredClone(monthlyPrice), quantity: 1, current_period_end: Math.floor(Date.now() / 1000) + 3600 }] } };
@@ -99,6 +101,9 @@ async function main() {
     await service.synchronizeStripeEvent({ ...event, id: 'evt_old', created: 101 }, stripe);
     assert.equal(await billing.hasWorkspaceAccess(first), false);
 
+    delete process.env.BILLING_TERMS_URL; delete process.env.BILLING_PRIVACY_URL;
+    assert.match(await service.createBillingPortal(first, stripe), /^https:\/\/billing.stripe.com/, 'missing legal setup must not block existing subscription management');
+    // All signed webhook route checks below also run without Checkout legal setup.
     const routeLoad = require('./load-typescript.cjs')(undefined, { '@/lib/stripe': { ...stripeModule, stripeClient: () => stripe }, '@/lib/stripe-billing': { ...service, synchronizeStripeEvent: event => service.synchronizeStripeEvent(event, stripe) } });
     const route = routeLoad('src/app/api/billing/webhook/route.ts');
     const payload = JSON.stringify({ ...event, id: 'evt_signed', created: 103 });

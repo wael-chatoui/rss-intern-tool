@@ -16,6 +16,23 @@ export function billingConfiguration() {
   return { mode, secret, price, origin: url.origin, enabled: process.env.BILLING_ENABLED === '1' };
 }
 
+/** New Checkout sessions require reviewed public documents, never a guessed URL. */
+export function checkoutConsentConfiguration(origin: string) {
+  const unavailable = () => new BillingError('Les conditions de vente et la politique de confidentialité doivent être configurées avant tout paiement.');
+  const legalUrl = (value: string | undefined) => {
+    if (!value || value.length > 2000 || /[\s\u0000-\u001f\u007f]/u.test(value) || ['\\', '(', ')', '[', ']', '<', '>'].some(character => value.includes(character))) throw unavailable();
+    let url: URL;
+    try { url = new URL(value); } catch { throw unavailable(); }
+    if (url.protocol !== 'https:' || url.origin !== origin || url.username || url.password || url.pathname === '/' || url.search || url.hash) throw unavailable();
+    return url.href;
+  };
+  const termsUrl = legalUrl(process.env.BILLING_TERMS_URL);
+  const privacyUrl = legalUrl(process.env.BILLING_PRIVACY_URL);
+  const message = `J’accepte les [conditions de vente](${termsUrl}) et j’ai pris connaissance de la [politique de confidentialité](${privacyUrl}).`;
+  if (message.length > 1200) throw unavailable();
+  return { termsUrl, privacyUrl, message };
+}
+
 export function stripeClient() {
   const config = billingConfiguration();
   return new Stripe(config.secret, { maxNetworkRetries: 2, timeout: 15_000 });

@@ -3,7 +3,7 @@ import type Stripe from 'stripe';
 import type { Owner } from '@/lib/auth-store';
 import { billingMode, getAccountBilling, setAccountBilling, setMemberCustomer, memberIdForCustomer } from '@/lib/billing-store';
 import { inDurableTransaction, readDurableDocument, writeDurableDocument } from '@/lib/durable-store';
-import { BillingError, billingConfiguration, stripeClient } from '@/lib/stripe';
+import { BillingError, billingConfiguration, checkoutConsentConfiguration, stripeClient } from '@/lib/stripe';
 
 const APPLICATION = 'la-redaction';
 type CheckoutAttempt = { key: string; expiresAt: number; configuration?: string; sessionId?: string; url?: string };
@@ -24,11 +24,13 @@ function ownsCheckout(session: Stripe.Checkout.Session, memberId: string, custom
     && session.metadata?.application === APPLICATION && session.metadata.memberId === memberId;
 }
 
-function isCurrentCheckout(session: Stripe.Checkout.Session, config: ReturnType<typeof billingConfiguration>): boolean {
+function isCurrentCheckout(session: Stripe.Checkout.Session, config: ReturnType<typeof billingConfiguration>, consent: ReturnType<typeof checkoutConsentConfiguration>): boolean {
   const items = session.line_items;
   const item = items?.data[0];
   return session.mode === 'subscription' && session.livemode === (config.mode === 'live')
     && session.allow_promotion_codes === true && session.automatic_tax?.enabled === false
+    && session.consent_collection?.terms_of_service === 'required'
+    && session.custom_text?.terms_of_service_acceptance?.message === consent.message
     && session.success_url === `${config.origin}/compte?retour=succes`
     && session.cancel_url === `${config.origin}/compte?retour=annulation`
     && !!items && !items.has_more && items.data.length === 1 && item?.quantity === 1
@@ -38,6 +40,7 @@ function isCurrentCheckout(session: Stripe.Checkout.Session, config: ReturnType<
 export async function createSubscriptionCheckout(account: Owner, stripe = stripeClient()): Promise<string> {
   const config = billingConfiguration();
   if (!config.enabled || !account.id) throw new BillingError('Les abonnements ne sont pas encore ouverts.');
+  const consent = checkoutConsentConfiguration(config.origin);
   const price = await stripe.prices.retrieve(config.price, { expand: ['product'] });
   if (!isMonthlyPrice(price, config.mode)) throw new BillingError('Le tarif d’abonnement doit être vérifié avant tout paiement.');
   const billing = await getAccountBilling(account.id);
@@ -51,7 +54,7 @@ export async function createSubscriptionCheckout(account: Owner, stripe = stripe
   const subscriptions = await stripe.subscriptions.list({ customer: customerId, status: 'all', limit: 100 });
   if (subscriptions.data.some(subscription => subscription.metadata.application === APPLICATION && !['canceled', 'incomplete_expired'].includes(subscription.status))) throw new BillingError('Un abonnement existe déjà. Gérez-le depuis « Mon abonnement et mes factures ».', 409);
   const checkoutId = `checkout:${billingMode()}:${account.id}`;
-  const configuration = JSON.stringify({ price: config.price, customerId, origin: config.origin, promotions: true, automaticTax: false });
+  const configuration = JSON.stringify({ price: config.price, customerId, origin: config.origin, promotions: true, automaticTax: false, requiredTerms: consent });
   const previousRaw = await readDurableDocument(checkoutId);
   if (previousRaw) {
     const previous = JSON.parse(previousRaw) as CheckoutAttempt;
@@ -59,7 +62,7 @@ export async function createSubscriptionCheckout(account: Owner, stripe = stripe
       const session = await stripe.checkout.sessions.retrieve(previous.sessionId, { expand: ['line_items.data.price'] });
       if (!ownsCheckout(session, account.id, customerId)) throw new BillingError('La session de paiement ne correspond pas à votre compte.', 409);
       if (session.status === 'complete') throw new BillingError('Votre paiement a déjà été reçu. La confirmation de votre abonnement est en cours.', 409);
-      if (session.status === 'open' && session.url && isCurrentCheckout(session, config)) return session.url;
+      if (session.status === 'open' && session.url && isCurrentCheckout(session, config, consent)) return session.url;
       if (session.status === 'open') await stripe.checkout.sessions.expire(session.id);
       await inDurableTransaction(async () => {
         const current = await readDurableDocument(checkoutId);
@@ -80,7 +83,7 @@ export async function createSubscriptionCheckout(account: Owner, stripe = stripe
   // Another request may have finished while this request acquired the lock.
   if (attempt.sessionId) {
     const current = await stripe.checkout.sessions.retrieve(attempt.sessionId, { expand: ['line_items.data.price'] });
-    if (ownsCheckout(current, account.id, customerId) && current.status === 'open' && current.url && isCurrentCheckout(current, config)) return current.url;
+    if (ownsCheckout(current, account.id, customerId) && current.status === 'open' && current.url && isCurrentCheckout(current, config, consent)) return current.url;
     throw new BillingError('La session de paiement vient de changer. Rechargez votre compte avant de réessayer.', 409);
   }
   const session = await stripe.checkout.sessions.create({
@@ -91,6 +94,8 @@ export async function createSubscriptionCheckout(account: Owner, stripe = stripe
     subscription_data: { metadata: { application: APPLICATION, memberId: account.id } },
     allow_promotion_codes: true,
     automatic_tax: { enabled: false },
+    consent_collection: { terms_of_service: 'required' },
+    custom_text: { terms_of_service_acceptance: { message: consent.message } },
     success_url: `${config.origin}/compte?retour=succes`,
     cancel_url: `${config.origin}/compte?retour=annulation`,
     expires_at: Math.floor(attempt.expiresAt / 1000),
