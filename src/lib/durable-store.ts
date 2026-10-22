@@ -79,6 +79,13 @@ export async function readDurableDocument(id: string): Promise<string | null> {
   return result.rows.length ? String(result.rows[0].body) : null;
 }
 
+/** Check a trusted namespace without loading its private document bodies. */
+export async function hasDurableDocuments(prefix: string): Promise<boolean> {
+  if (!prefix || /[*?\[\]]/.test(prefix)) throw new Error('Préfixe de documents invalide.');
+  const result = await (await executor()).execute({ sql: 'SELECT 1 FROM redaction_documents WHERE id GLOB ? LIMIT 1', args: [`${prefix}*`] });
+  return result.rows.length > 0;
+}
+
 export async function writeDurableDocument(id: string, body: string): Promise<void> {
   await (await executor()).execute({ sql: 'INSERT INTO redaction_documents (id, body, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at', args: [id, body, new Date().toISOString()] });
 }

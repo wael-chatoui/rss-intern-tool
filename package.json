@@ -12,7 +12,7 @@
     "test": "node scripts/test-notes.cjs && node scripts/test-note-drafts.cjs && node scripts/test-notes-workspace.cjs && node scripts/test-read-only-workspace.cjs && node scripts/test-workspace-state.cjs && node scripts/test-workspace-navigation.cjs && node scripts/test-newsroom-flow.cjs && node scripts/test-transfer-formats.cjs && node scripts/test-transfer-store.cjs && node scripts/test-transfer-pdf.cjs",
     "test:rss": "node scripts/test-rss.cjs && node scripts/test-rss-route.cjs",
     "auth:setup": "node scripts/auth-owner.cjs",
-    "test:auth": "node scripts/test-auth-store.cjs && node scripts/test-auth-routes.cjs",
+    "test:auth": "node scripts/test-auth-store.cjs && node scripts/test-auth-routes.cjs && node scripts/test-login-availability.cjs",
     "test:durable": "node scripts/test-durable-store.cjs",
     "test:stripe": "node scripts/test-stripe-billing.cjs && node scripts/test-checkout-consent.cjs",
     "test:security": "node scripts/test-feed-security.cjs",

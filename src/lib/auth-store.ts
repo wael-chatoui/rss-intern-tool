@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
-import { inDurableTransaction, readDurableDocument, usesDurableStorage, writeDurableDocument } from '@/lib/durable-store';
+import { hasDurableDocuments, inDurableTransaction, readDurableDocument, usesDurableStorage, writeDurableDocument } from '@/lib/durable-store';
 
 export type Owner = { email: string; name: string; id?: string };
 export const AUTH_COOKIE = 'redaction_session';
@@ -129,6 +129,12 @@ export function getOwner(): Promise<Owner | null> {
     const data = await readAuthFile();
     return data ? publicOwner(data.owner) : null;
   });
+}
+
+/** Closing registration must not hide sign-in from existing subscribers. */
+export function hasRegisteredAccounts(): Promise<boolean> {
+  return serialize(async () => !!await readAuthFile()
+    || (usesDurableStorage() && await hasDurableDocuments('member:member_')));
 }
 
 /** Local installation/reset only. Never expose this operation as a public API. */
