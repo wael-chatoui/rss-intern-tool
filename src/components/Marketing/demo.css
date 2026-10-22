@@ -34,5 +34,8 @@
 .demo-footer p { max-width: 50ch; }
 .demo-footer a { display: inline-flex; align-items: center; gap: .75rem; color: var(--brand); text-underline-offset: .2em; }
 .demo-footer svg { width: 1.125rem; height: 1.125rem; }
+.demo-test-access { flex-basis: 100%; min-width: 0; }
+.demo-test-access p { margin-block-end: .5rem; color: var(--ink-muted); font-size: .875rem; line-height: 1.75; }
+.demo-test-access a { min-height: 2.75rem; }
 @media (max-width: 750px) { .demo-workspace { grid-template-columns: 1fr; }.demo-navigation { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: .5rem; gap: .25rem; }.demo-navigation button { flex-direction: column; text-align: center; justify-content: center; white-space: normal; padding: .75rem .25rem; font-size: .8125rem; line-height: 1.5; }.demo-plan-fields { grid-template-columns: 1fr; }.demo-intro { margin-block-start: 3rem; }.demo-header .brand-name { font-size: 1.125rem; } }
 @media (max-width: 420px) { .demo-page { width: min(100% - 2rem, 74rem); }.demo-header .btn { width: 100%; justify-content: center; }.demo-editor-actions .btn { width: 100%; justify-content: center; } }

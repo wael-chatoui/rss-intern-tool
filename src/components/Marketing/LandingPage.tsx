@@ -139,10 +139,16 @@ export function LandingPage({ signedIn = false, signupEnabled = false, billingEn
 
         <section className="marketing-start marketing-container" aria-labelledby="start-title">
           <h2 id="start-title">Votre prochain sujet<br />commence ici.</h2>
-          <Link href={signedIn ? workspaceHref : signupEnabled ? '/inscription' : '/demo'} className="marketing-start-link">
-            {signedIn ? 'Ouvrir mon espace' : signupEnabled ? 'Créer mon espace privé' : 'Essayer sans compte'}
-            <ArrowRight aria-hidden="true" />
-          </Link>
+          <div className="marketing-start-actions">
+            <Link href={signedIn ? workspaceHref : signupEnabled ? '/inscription' : '/demo'} className="marketing-start-link">
+              {signedIn ? 'Ouvrir mon espace' : signupEnabled ? 'Créer mon espace privé' : 'Essayer sans compte'}
+              <ArrowRight aria-hidden="true" />
+            </Link>
+            {!signedIn && !signupEnabled && <>
+              <p>Pour un essai avec vos propres sources, contactez l’éditeur. Les inscriptions publiques sont encore fermées.</p>
+              <a className="marketing-demo-link" href="https://wael-chatoui.vercel.app/?utm_source=la_redaction&utm_medium=referral&utm_campaign=tests_oct2026&utm_content=landing_test_access#contact">Demander un accès de test<ArrowUpRight aria-hidden="true" /></a>
+            </>}
+          </div>
         </section>
       </main>
 

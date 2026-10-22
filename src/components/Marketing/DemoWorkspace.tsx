@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, CalendarDays, Download, FileText, NotebookPen, RotateCcw } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, CalendarDays, Download, FileText, NotebookPen, RotateCcw } from 'lucide-react';
 import './demo.css';
 
 export function DemoWorkspace({ signupEnabled }: { signupEnabled: boolean }) {
@@ -35,6 +35,13 @@ export function DemoWorkspace({ signupEnabled }: { signupEnabled: boolean }) {
       </div>
     </div>
     <div className="demo-foot"><p role="status">{notice || 'Les essais sont effacés à la fermeture ou au rechargement de la page.'}</p><button className="btn btn-ghost" onClick={reset}><RotateCcw aria-hidden="true" />Recommencer</button></div>
-    <footer className="demo-footer"><p>Dans votre espace : sources RSS réelles, notes privées, enregistrement automatique et exports.</p><Link href={signupEnabled ? '/inscription' : '/'}>{signupEnabled ? 'Créer mon espace privé' : 'Découvrir les fonctionnalités'}<ArrowRight aria-hidden="true" /></Link></footer>
+    <footer className="demo-footer">
+      <p>Dans votre espace : sources RSS réelles, notes privées, enregistrement automatique et exports.</p>
+      <Link href={signupEnabled ? '/inscription' : '/'}>{signupEnabled ? 'Créer mon espace privé' : 'Découvrir les fonctionnalités'}<ArrowRight aria-hidden="true" /></Link>
+      {!signupEnabled && <div className="demo-test-access">
+        <p>Pour un essai avec vos propres sources, contactez l’éditeur. Les inscriptions publiques sont encore fermées.</p>
+        <a href="https://wael-chatoui.vercel.app/?utm_source=la_redaction&utm_medium=referral&utm_campaign=tests_oct2026&utm_content=demo_test_access#contact">Demander un accès de test<ArrowUpRight aria-hidden="true" /></a>
+      </div>}
+    </footer>
   </main>;
 }

@@ -226,6 +226,9 @@
 .marketing-start-link { display: inline-flex; align-items: center; gap: 30px; min-height: 48px; border-bottom: 1px solid var(--brand); color: var(--brand); font-size: 15px; text-decoration: none; }
 .marketing-start-link svg { width: 22px; height: 22px; transition: transform var(--duration-fast); }
 .marketing-start-link:hover svg { transform: translateX(3px); }
+.marketing-start-actions { min-width: 0; max-width: 32rem; }
+.marketing-start-actions > p { max-width: 46ch; margin-block-start: 1.5rem; color: var(--ink-muted); font-size: 14px; line-height: 1.75; }
+.marketing-start-actions .marketing-demo-link { margin-block-start: .5rem; }
 .marketing-footer { display: flex; align-items: center; gap: 22px; padding-top: 28px; padding-bottom: 33px; border-top: 1px solid var(--line); color: var(--ink-muted); font-size: 11px; }
 .marketing-footer-brand { font-family: var(--font-display); color: var(--ink); font-size: 20px; letter-spacing: -.5px; }
 .marketing-footer > a { display: inline-flex; align-items: center; gap: 11px; margin-left: auto; min-height: 44px; text-decoration: none; }
