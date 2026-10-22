@@ -117,6 +117,26 @@ function makeHarness(options = {}) {
   online = true; offline.emit('online'); await offline.tick();
   assert.equal(calls, 2); assert.equal(offline.storage.length, 0); assert.match(offline.text(), /Tout est enregistré/);
 
+  let entitled = false;
+  const expired = makeHarness({ props: { onSavePost: async post => {
+    if (!entitled) throw Object.assign(new Error('Un abonnement actif est nécessaire.'), { status: 402, code: 'SUBSCRIPTION_REQUIRED' });
+    return { ...post, revision: 1 };
+  } } });
+  expired.body('Mon brouillon après la fin de l’abonnement');
+  await assert.rejects(expired.handle.current.flush()); expired.render();
+  assert.match(expired.text(), /abonnement ne permet plus d’enregistrer/);
+  assert.doesNotMatch(expired.text(), /Vérifiez votre connexion|reprendra au retour/);
+  assert.equal(expired.find(node => node.type === 'a' && node.props?.href === '/compte').props.href, '/compte');
+  assert.equal(expired.storage.length, 1, 'an expired subscription must keep the exact local draft');
+  assert.equal(expired.find(node => node.props?.id === 'note-body').props.value, 'Mon brouillon après la fin de l’abonnement');
+  entitled = true; await expired.handle.current.flush(); expired.render();
+  assert.match(expired.text(), /Tout est enregistré/); assert.equal(expired.storage.length, 0);
+
+  const rejected = makeHarness({ props: { onSavePost: async () => { throw Object.assign(new Error('Le texte dépasse la limite autorisée.'), { status: 400 }); } } });
+  rejected.body('Texte à conserver'); await assert.rejects(rejected.handle.current.flush()); rejected.render();
+  assert.match(rejected.text(), /Le texte dépasse la limite autorisée/);
+  assert.doesNotMatch(rejected.text(), /Vérifiez votre connexion/);
+
   const quota = makeHarness(); quota.storage.fail = true; quota.body('Ne pas perdre');
   assert.match(quota.text(), /stockage plein ou indisponible/);
 
@@ -158,5 +178,5 @@ function makeHarness(options = {}) {
   backlog.find(node => node.type === 'button' && textOf(node).includes('Planifier') && node.props?.['aria-label']?.startsWith('Planifier ')).props.onClick(); await backlog.tick();
   assert.match(planned.scheduledDate, /^\d{4}-\d{2}-\d{2}$/); assert.equal(planned.status, 'idea', 'planning a draft must not claim it is published');
 
-  console.log('Notes workspace: revisions, dirty source attachment, conflicts, local recovery, online retry, quota, deletion, loading states, scheduling and full-text search passed.');
+  console.log('Notes workspace: revisions, conflicts, local recovery, persistence/network/subscription errors, quota, deletion, scheduling and full-text search passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

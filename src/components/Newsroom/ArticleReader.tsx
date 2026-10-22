@@ -8,9 +8,14 @@ import { normalizeSearchText } from '@/lib/search';
 import { safeWebUrl, useDialogAccessibility } from './dialog';
 import './newsroom-dialogs.css';
 
-interface ArticleReaderProps {
+interface ArticleReaderBaseProps {
   article: RSSArticle | null;
   onClose: () => void;
+  onPrevious?: () => void;
+  onNext?: () => void;
+  position?: { current: number; total: number };
+}
+interface ArticleReaderActions {
   onToggleSave: (article: RSSArticle) => Promise<void>;
   onToggleRead: (article: RSSArticle) => Promise<void>;
   onCreateNote: (article: RSSArticle) => Promise<void>;
@@ -19,11 +24,10 @@ interface ArticleReaderProps {
   notesError: string;
   onRetryNotes: () => void;
   onAttachToNote: (id: string, article: RSSArticle) => Promise<void>;
-  onPrevious?: () => void;
-  onNext?: () => void;
   onReadAndNext: (article: RSSArticle) => Promise<void>;
-  position?: { current: number; total: number };
 }
+type ArticleReaderProps = ArticleReaderBaseProps & ({ readOnly: true } | ({ readOnly?: false } & ArticleReaderActions));
+const EMPTY_NOTES: SocialPost[] = [];
 interface InlinePart { text: string; href?: string; strong?: boolean; emphasis?: boolean }
 interface ArticleBlock { text: string; parts: InlinePart[]; kind: 'paragraph' | 'heading' | 'quote' | 'list'; items?: InlinePart[][]; ordered?: boolean }
 
@@ -64,7 +68,12 @@ function publishedDate(value: string) {
   return Number.isNaN(date.getTime()) ? 'Date non précisée' : new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }).format(date);
 }
 
-export function ArticleReader({ article, onClose, onToggleSave, onToggleRead, onCreateNote, notes, notesLoading, notesError, onRetryNotes, onAttachToNote, onPrevious, onNext, onReadAndNext, position }: ArticleReaderProps) {
+export function ArticleReader(props: ArticleReaderProps) {
+  const { article, onClose, onPrevious, onNext, position } = props;
+  const editable = props.readOnly ? null : props;
+  const notes = editable?.notes || EMPTY_NOTES;
+  const notesLoading = editable?.notesLoading || false;
+  const notesError = editable?.notesError || '';
   const backdropRef = useRef<HTMLDialogElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -116,20 +125,20 @@ export function ArticleReader({ article, onClose, onToggleSave, onToggleRead, on
   const contentBlocks = blocks.filter(block => block.text !== snippet && block.text !== article.title);
   const readingMinutes = Math.max(1, Math.ceil(`${snippet} ${contentBlocks.map(block => block.text).join(' ')}`.split(/\s+/).length / 220));
   const runAction = async (kind: 'save' | 'read' | 'note' | 'advance') => {
-    if (pending) return;
+    if (!editable || pending) return;
     const generation = actionGeneration.current;
     setPending(kind); setError('');
     try {
-      await (kind === 'save' ? onToggleSave(article) : kind === 'read' ? onToggleRead(article) : kind === 'advance' ? onReadAndNext(article) : onCreateNote(article));
+      await (kind === 'save' ? editable.onToggleSave(article) : kind === 'read' ? editable.onToggleRead(article) : kind === 'advance' ? editable.onReadAndNext(article) : editable.onCreateNote(article));
       if (kind === 'note' && generation === actionGeneration.current) onClose();
     } catch (cause) { if (generation === actionGeneration.current) setError(cause instanceof Error ? cause.message : 'Cette action n’a pas abouti. Réessayez.'); }
     finally { if (generation === actionGeneration.current) setPending(null); }
   };
   const attach = async (id: string) => {
-    if (pending) return;
+    if (!editable || pending) return;
     const generation = actionGeneration.current;
     setPending('attach'); setError('');
-    try { await onAttachToNote(id, article); if (generation === actionGeneration.current) onClose(); }
+    try { await editable.onAttachToNote(id, article); if (generation === actionGeneration.current) onClose(); }
     catch (cause) { if (generation === actionGeneration.current) setError(cause instanceof Error ? cause.message : 'La référence n’a pas pu être ajoutée. Réessayez.'); }
     finally { if (generation === actionGeneration.current) setPending(null); }
   };
@@ -142,11 +151,11 @@ export function ArticleReader({ article, onClose, onToggleSave, onToggleRead, on
         <button className="icon-btn reader-close" onClick={close} aria-label="Fermer l’article" title="Fermer (Échap)"><X size={21} aria-hidden="true" /></button>
       </header>
       <div className="reader-scroll" ref={scrollRef} tabIndex={0} aria-label={choosingNote ? 'Choisir un sujet' : 'Contenu de l’article'}>
-        {choosingNote ? <section className="reader-note-picker">
+        {choosingNote && editable ? <section className="reader-note-picker">
           <button className="btn btn-ghost" onClick={() => { setChoosingNote(false); setError(''); requestAnimationFrame(() => headingRef.current?.focus()); }}><ArrowLeft aria-hidden="true" />Revenir à l’article</button>
           <h1 id={titleId}>Ajouter à un sujet existant</h1><p>La référence sera ajoutée aux sources du sujet. Vos notes restent conservées.</p>
           <label className="reader-note-search"><Search aria-hidden="true" /><span className="sr-only">Rechercher un sujet</span><input ref={searchRef} className="field" value={noteQuery} onChange={event => setNoteQuery(event.target.value)} placeholder="Rechercher dans vos notes…" /></label>
-          {notesError ? <div className="dialog-message dialog-message-error" role="alert"><p>{notesError}</p><button className="btn btn-secondary" onClick={onRetryNotes}>Recharger les notes</button></div> : notesLoading ? <p role="status"><Loader2 className="is-spinning" aria-hidden="true" />Chargement des notes…</p> : matchingNotes.length ? <div className="reader-note-options">{matchingNotes.map(note => {
+          {notesError ? <div className="dialog-message dialog-message-error" role="alert"><p>{notesError}</p><button className="btn btn-secondary" onClick={editable.onRetryNotes}>Recharger les notes</button></div> : notesLoading ? <p role="status"><Loader2 className="is-spinning" aria-hidden="true" />Chargement des notes…</p> : matchingNotes.length ? <div className="reader-note-options">{matchingNotes.map(note => {
             const attached = getNoteSources(note).some(source => source.articleId === article.id || (source.link && source.link === article.link));
             return <button key={note.id} disabled={!!pending} onClick={() => void attach(note.id)}><span><strong>{note.angle.trim() || 'Note sans titre'}</strong><small>{attached ? 'Source déjà présente' : `${getNoteSources(note).length} référence${getNoteSources(note).length === 1 ? '' : 's'}`}</small></span>{pending === 'attach' ? <Loader2 className="is-spinning" aria-hidden="true" /> : <ArrowRight aria-hidden="true" />}</button>;
           })}</div> : <div className="reader-note-empty"><p>{noteQuery ? 'Aucun sujet ne correspond à cette recherche.' : 'Vous n’avez pas encore de note.'}</p>{noteQuery ? <button className="btn btn-secondary" onClick={() => setNoteQuery('')}>Effacer la recherche</button> : <button className="btn btn-primary" disabled={!!pending} onClick={() => void runAction('note')}>Créer une note avec cette source</button>}</div>}
@@ -163,8 +172,9 @@ export function ArticleReader({ article, onClose, onToggleSave, onToggleRead, on
       </div>
       <footer className="reader-footer">
         {error && <p className="dialog-message dialog-message-error" role="alert"><AlertCircle size={16} aria-hidden="true" />{error}</p>}
-        {!choosingNote && <div className="reader-navigation" aria-label="Parcourir les articles"><button className="btn btn-ghost" aria-label="Article précédent" onClick={onPrevious} disabled={!!pending || !onPrevious}><ChevronLeft aria-hidden="true" /><span>Précédent</span></button><button className="btn btn-secondary" onClick={() => void runAction('advance')} disabled={!!pending}>{pending === 'advance' ? <Loader2 className="dialog-spinner" aria-hidden="true" /> : <CheckCheck aria-hidden="true" />}{onNext ? 'Lu et suivant' : 'Lu et terminer'}</button><button className="btn btn-ghost" aria-label="Article suivant" onClick={onNext} disabled={!!pending || !onNext}><span>Suivant</span><ChevronRight aria-hidden="true" /></button></div>}
-        {!choosingNote && <div className="reader-footer-actions"><div className="reader-utility-actions">
+        {!choosingNote && <div className="reader-navigation" aria-label="Parcourir les articles"><button className="btn btn-ghost" aria-label="Article précédent" onClick={onPrevious} disabled={!!pending || !onPrevious}><ChevronLeft aria-hidden="true" /><span>Précédent</span></button>{editable && <button className="btn btn-secondary" onClick={() => void runAction('advance')} disabled={!!pending}>{pending === 'advance' ? <Loader2 className="dialog-spinner" aria-hidden="true" /> : <CheckCheck aria-hidden="true" />}{onNext ? 'Lu et suivant' : 'Lu et terminer'}</button>}<button className="btn btn-ghost" aria-label="Article suivant" onClick={onNext} disabled={!!pending || !onNext}><span>Suivant</span><ChevronRight aria-hidden="true" /></button></div>}
+        {!editable && <p className="reader-readonly-notice">Copie enregistrée, en lecture seule.</p>}
+        {!choosingNote && editable && <div className="reader-footer-actions"><div className="reader-utility-actions">
           <button className={`btn btn-secondary ${article.saved ? 'reader-is-saved' : ''}`} onClick={() => void runAction('save')} disabled={!!pending} aria-pressed={!!article.saved}>{pending === 'save' ? <Loader2 className="dialog-spinner" aria-hidden="true" /> : <Bookmark fill={article.saved ? 'currentColor' : 'none'} aria-hidden="true" />}<span>{article.saved ? 'Enregistré' : 'Enregistrer'}</span></button>
           <button className="icon-btn reader-read-toggle" aria-label={article.read ? 'Marquer non lu' : 'Marquer comme lu'} title={article.read ? 'Marquer non lu' : 'Marquer comme lu'} onClick={() => void runAction('read')} disabled={!!pending} aria-pressed={!!article.read}><CheckCheck aria-hidden="true" /></button>
         </div><div className="reader-subject-actions"><button className="btn btn-secondary" disabled={!!pending} onClick={() => setChoosingNote(true)}><Link2 aria-hidden="true" /><span>Ajouter à un sujet</span></button><button className="btn btn-primary" onClick={() => void runAction('note')} disabled={!!pending}>{pending === 'note' ? <Loader2 className="dialog-spinner" aria-hidden="true" /> : <FilePenLine aria-hidden="true" />}Créer une note</button></div></div>}

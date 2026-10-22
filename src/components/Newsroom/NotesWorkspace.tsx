@@ -75,6 +75,7 @@ export const NotesWorkspace = forwardRef<NotesWorkspaceHandle, NotesWorkspacePro
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const saves = useRef(new Map<string, Promise<void>>());
   const conflicts = useRef(new Map<string, NoteConflict>());
+  const saveFailures = useRef(new Map<string, { status?: number; code?: string; message: string }>());
   const missingNoteIds = useRef(new Set<string>());
   const previousPostIds = useRef(new Set<string>());
   const recoveredOrigins = useRef(new Map<string, StoredNoteDraft[]>());
@@ -162,6 +163,7 @@ export const NotesWorkspace = forwardRef<NotesWorkspaceHandle, NotesWorkspacePro
     const request = (async () => {
       try {
         const saved = await saveCallback.current({ ...snapshot, revision: snapshot.revision ?? 0 });
+        saveFailures.current.delete(id);
         if (versions.current.get(id) === version) {
           drafts.current.set(id, saved);
           dirty.current.delete(id);
@@ -175,6 +177,7 @@ export const NotesWorkspace = forwardRef<NotesWorkspaceHandle, NotesWorkspacePro
         if (mounted.current) setRevision(value => value + 1);
       } catch (error) {
         const cause = error as SaveFailure;
+        saveFailures.current.set(id, { status: cause.status, code: cause.code, message: cause.message || '' });
         if (cause.status === 409 && cause.code === 'NOTE_CONFLICT' && cause.post) {
           conflicts.current.set(id, { server: cause.post });
           updateSaveState(id, 'conflict');
@@ -250,6 +253,8 @@ export const NotesWorkspace = forwardRef<NotesWorkspaceHandle, NotesWorkspacePro
   const selected = selectedPostId ? drafts.current.get(selectedPostId) || posts.find((post) => post.id === selectedPostId) || null : null;
   const selectedState = selected ? saveStates[selected.id] || 'saved' : 'saved';
   const selectedConflict = selected ? conflicts.current.get(selected.id) : undefined;
+  const selectedFailure = selected ? saveFailures.current.get(selected.id) : undefined;
+  const subscriptionRequired = selectedFailure?.code === 'SUBSCRIPTION_REQUIRED' || selectedFailure?.status === 402;
   const selectedSources = selected ? getNoteSources(selected) : [];
   const failedIds = Object.keys(saveStates).filter((id) => saveStates[id] === 'error' && dirty.current.has(id));
   useEffect(() => {
@@ -327,7 +332,7 @@ export const NotesWorkspace = forwardRef<NotesWorkspaceHandle, NotesWorkspacePro
     if (!selected || !selectedConflict || !archiveLocal(selected)) return;
     const timer = timers.current.get(selected.id); if (timer) clearTimeout(timer);
     drafts.current.set(selected.id, selectedConflict.server);
-    dirty.current.delete(selected.id); conflicts.current.delete(selected.id); recoveredOrigins.current.delete(selected.id);
+    dirty.current.delete(selected.id); conflicts.current.delete(selected.id); recoveredOrigins.current.delete(selected.id); saveFailures.current.delete(selected.id);
     updateSaveState(selected.id, 'saved'); setConfirmServerVersion(false);
     setRevision(value => value + 1); refreshRecovery();
   };
@@ -339,12 +344,12 @@ export const NotesWorkspace = forwardRef<NotesWorkspaceHandle, NotesWorkspacePro
       await onDuplicatePost(post);
       const conflict = conflicts.current.get(post.id);
       if (conflict && versions.current.get(post.id) === version) {
-        drafts.current.set(post.id, conflict.server); dirty.current.delete(post.id); conflicts.current.delete(post.id);
+        drafts.current.set(post.id, conflict.server); dirty.current.delete(post.id); conflicts.current.delete(post.id); saveFailures.current.delete(post.id);
         cleanupLocal(post.id, post); updateSaveState(post.id, 'saved'); setRevision(value => value + 1);
       }
       if (missingNoteIds.current.has(post.id) && versions.current.get(post.id) === version) {
         dirty.current.delete(post.id); missingNoteIds.current.delete(post.id); cleanupLocal(post.id, post);
-        drafts.current.delete(post.id); setRevision(value => value + 1);
+        drafts.current.delete(post.id); saveFailures.current.delete(post.id); setRevision(value => value + 1);
       }
       if (origin) {
         try { removeNoteDraftIfUnchanged(window.localStorage, origin.key, origin.post); refreshRecovery(); }
@@ -361,7 +366,7 @@ export const NotesWorkspace = forwardRef<NotesWorkspaceHandle, NotesWorkspacePro
     drafts.current.set(record.post.id, record.post); dirty.current.add(record.post.id);
     versions.current.set(record.post.id, (versions.current.get(record.post.id) || 0) + 1);
     recoveredOrigins.current.set(record.post.id, [...(recoveredOrigins.current.get(record.post.id) || []), record]);
-    conflicts.current.delete(record.post.id); storeLocal(record.post); updateSaveState(record.post.id, 'pending');
+    conflicts.current.delete(record.post.id); saveFailures.current.delete(record.post.id); storeLocal(record.post); updateSaveState(record.post.id, 'pending');
     setRevision(value => value + 1); select(record.post.id); refreshRecovery();
     timers.current.set(record.post.id, setTimeout(() => { void persist(record.post.id).catch(() => undefined); }, 650));
   };
@@ -397,7 +402,7 @@ export const NotesWorkspace = forwardRef<NotesWorkspaceHandle, NotesWorkspacePro
       cleanupLocal(id, drafts.current.get(id) || selected);
       drafts.current.delete(id);
       dirty.current.delete(id);
-      conflicts.current.delete(id); recoveredOrigins.current.delete(id);
+      conflicts.current.delete(id); recoveredOrigins.current.delete(id); saveFailures.current.delete(id);
       setSaveStates(current => { const next = { ...current }; delete next[id]; return next; });
       setConfirmDelete(false);
     } catch (error) {
@@ -454,7 +459,7 @@ export const NotesWorkspace = forwardRef<NotesWorkspaceHandle, NotesWorkspacePro
           <button className="notes-icon" disabled={deleting} onClick={() => setConfirmDelete(true)} aria-label="Supprimer cette note" title="Supprimer cette note"><Trash2 size={17} /></button>
         </div>
       </div>
-      {selectedState === 'error' && <p className="notes-inline-error" role="alert">{missingNoteIds.current.has(selected.id) ? 'Cette note a été supprimée ailleurs.' : 'Le serveur n’a pas reçu les dernières modifications.'} Votre brouillon reste sur cette page{!storageError ? ' et dans une copie locale sur cet appareil' : ''}.{!missingNoteIds.current.has(selected.id) && ' L’enregistrement reprendra au retour de la connexion.'} <button className="notes-action" onClick={() => downloadLocal(selected)}>Télécharger le brouillon</button>{missingNoteIds.current.has(selected.id) && onDuplicatePost && <button className="notes-action" disabled={resolvingConflict} onClick={() => void duplicateLocal(selected)}>Conserver dans une nouvelle note</button>}</p>}
+      {selectedState === 'error' && <p className="notes-inline-error" role="alert">{missingNoteIds.current.has(selected.id) ? 'Cette note a été supprimée ailleurs.' : subscriptionRequired ? 'Votre abonnement ne permet plus d’enregistrer cette note.' : selectedFailure?.status && selectedFailure.message ? selectedFailure.message : 'Le serveur n’a pas reçu les dernières modifications.'} Votre brouillon reste sur cette page{!storageError ? ' et dans une copie locale sur cet appareil' : ''}. <button className="notes-action" onClick={() => downloadLocal(selected)}>Télécharger le brouillon</button>{subscriptionRequired && <a className="notes-action" href="/compte">Mon compte et mon abonnement</a>}{missingNoteIds.current.has(selected.id) && onDuplicatePost && <button className="notes-action" disabled={resolvingConflict} onClick={() => void duplicateLocal(selected)}>Conserver dans une nouvelle note</button>}</p>}
       {confirmDelete && <div className="notes-delete-confirm" role="alert">
         <div><strong>Supprimer cette note ?</strong><p>La note et ses déclinaisons seront supprimées.</p></div>
         <button className="notes-action" onClick={() => setConfirmDelete(false)} disabled={deleting}>Annuler</button>

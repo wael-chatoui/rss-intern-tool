@@ -145,5 +145,11 @@ function makeHarness(options = {}) {
   lateNote.resolve(); await closedReader.tick();
   assert.equal(closes, 1, 'an old creation acknowledgement must not close a newly opened reader');
   assert.match(closedReader.text(), /Article b/);
-  console.log('Newsroom flow: initial note-load reconciliation in both response orders, explicit loading state, late read navigation, stale reader errors/pending state and late creation acknowledgement passed.');
+  let navigation = 0;
+  const readOnly = makeHarness({ reader: true, props: { readOnly: true, article: a, position: { current: 1, total: 2 }, onNext() { navigation += 1; } } });
+  assert.match(readOnly.text(), /Copie enregistrée, en lecture seule/);
+  assert.doesNotMatch(readOnly.text(), /Enregistrer|Marquer comme|Créer une note|Rattacher|Lu et suivant/);
+  readOnly.find(node => node.type === 'button' && node.props?.['aria-label'] === 'Article suivant').props.onClick();
+  assert.equal(navigation, 1, 'read-only navigation remains available without mutation callbacks');
+  console.log('Newsroom flow: note-load reconciliation, late navigation/errors/acknowledgement and a read-only reader without write actions passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

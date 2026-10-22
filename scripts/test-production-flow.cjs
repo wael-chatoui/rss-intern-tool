@@ -57,6 +57,9 @@ async function main() {
     const exported = await get('/api/account/export', sessionA.token); assert.equal(exported.status, 200);
     const exportData = await exported.json();assert.equal(exportData.posts[0].notes, 'Modification privée A');assert.ok(!JSON.stringify(exportData).includes('Texte privé B'));
     const readOnly = await get('/espace', sessionA.token);assert.equal(readOnly.status, 200);assert.match(await readOnly.text(), /lecture seule/);
+    const canceledAccount = await get('/compte', sessionA.token); const canceledAccountHtml = await canceledAccount.text();
+    assert.equal(canceledAccount.status, 200); assert.match(canceledAccountHtml, /Abonnement terminé/); assert.match(canceledAccountHtml, /consultables et téléchargeables/);
+    assert.doesNotMatch(canceledAccountHtml, /Votre espace attend son activation|Votre abonnement prendra fin/);
     assert.equal((await get('/activation', sessionA.token)).status, 307, 'owner cannot be installed twice');
     assert.equal((await get('/demo')).status, 200);
     const signedUp = await get('/api/auth/register', undefined, { method: 'POST', headers: { origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Nouveau compte', email: 'c@example.test', password, acceptTerms: true }) });

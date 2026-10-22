@@ -8,6 +8,6 @@ import { ReadOnlyWorkspace } from '@/components/Newsroom/ReadOnlyWorkspace';
 export default async function Workspace() {
   const owner = await getCurrentOwner();
   if (!owner) redirect('/connexion');
-  if (!await hasWorkspaceAccess(owner)) return <ReadOnlyWorkspace database={await getDb()} />;
+  if (!await hasWorkspaceAccess(owner)) return <ReadOnlyWorkspace database={await getDb()} draftStorageKey={`redaction:note-drafts:${owner.email}`} />;
   return <NewsroomApp owner={owner} />;
 }

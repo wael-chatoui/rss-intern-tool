@@ -6,6 +6,7 @@ import { FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowUpRight, Check, ChevronRight, Loader2, Plus, Rss, Search, Trash2, X } from 'lucide-react';
 import { FashionCategory, FeedSource, FeedHealth } from '@/types';
 import { safeWebUrl, useDialogAccessibility } from './dialog';
+import { normalizeSearchText } from '@/lib/search';
 import './newsroom-dialogs.css';
 
 interface SourceManagerProps {
@@ -79,7 +80,7 @@ export function SourceManager({ feeds, onFeedsChange, onSelectFeed, initialAddOp
   };
   const filteredFeeds = useMemo(() => feeds.filter(feed => {
     const categoryName = categories.find(item => item.value === feed.category)?.label || feed.category;
-    const matchesQuery = `${feed.name} ${feedDomain(feed)} ${categoryName}`.toLocaleLowerCase('fr').includes(query.toLocaleLowerCase('fr').trim());
+    const matchesQuery = normalizeSearchText(`${feed.name} ${feedDomain(feed)} ${categoryName}`).includes(normalizeSearchText(query));
     return matchesQuery && (filter === 'all' || (filter === 'active' ? feed.enabled : !feed.enabled));
   }), [feeds, query, filter]);
 
