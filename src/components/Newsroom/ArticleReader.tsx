@@ -144,7 +144,7 @@ export function ArticleReader(props: ArticleReaderProps) {
   };
 
   return <dialog ref={backdropRef} className="dialog-backdrop reader-backdrop" aria-labelledby={titleId} onCancel={event => { event.preventDefault(); close(); }} onMouseDown={event => { if (event.target === event.currentTarget) close(); }}>
-    <div className="reader-panel" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
+    <div className="reader-panel" ref={dialogRef} tabIndex={-1}>
       <header className="reader-toolbar">
         <div className="reader-source"><span className="reader-source-mark" aria-hidden="true">{article.feedName.trim().slice(0, 1).toLocaleUpperCase('fr')}</span><div><strong>{article.feedName}</strong><span>{article.feedLanguage === 'fr' ? 'Français' : 'Anglais'}</span></div></div>
         {position && <span className="reader-position">Article {position.current} sur {position.total}</span>}
