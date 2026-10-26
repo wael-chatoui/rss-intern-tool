@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentOwner } from '@/lib/auth';
 import { RegistrationForm } from '@/components/Auth/RegistrationForm';
 
-export const metadata: Metadata = { title: 'Créer mon espace privé | La Rédaction' };
+export const metadata: Metadata = { title: 'Créer mon espace privé | La Rédaction', robots: { index: false, follow: false } };
 export const dynamic = 'force-dynamic';
 export default async function Registration() {
   if (await getCurrentOwner()) redirect('/compte');

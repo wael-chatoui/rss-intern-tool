@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ArrowRight, ArrowUpRight } from 'lucide-react';
+import { EditorialScene } from './EditorialScene';
 import './marketing.css';
 
 export function LandingPage({ signedIn = false, signupEnabled = false, billingEnabled = false }: { signedIn?: boolean; signupEnabled?: boolean; billingEnabled?: boolean }) {
@@ -27,41 +28,23 @@ export function LandingPage({ signedIn = false, signupEnabled = false, billingEn
         <section className="marketing-hero marketing-container" aria-labelledby="landing-title">
           <div className="marketing-hero-copy">
             <h1 id="landing-title">De la veille<br />à la rédaction.</h1>
-            <p>Rassemblez vos sources RSS, conservez les articles utiles et préparez vos textes dans un même espace.</p>
+            <p>Un carnet de travail pour la presse indépendante. Suivez vos sources RSS, écrivez des notes sourcées et organisez vos sujets à venir.</p>
             <Link href={signedIn ? workspaceHref : signupEnabled ? '/inscription' : '/demo'} className="marketing-primary-link">
               {signedIn ? 'Ouvrir mon espace' : signupEnabled ? 'Créer mon espace privé' : 'Essayer la démonstration'}
               <ArrowRight aria-hidden="true" />
             </Link>
             {signupEnabled && <Link href="/demo" className="marketing-demo-link">Essayer sans compte<ArrowUpRight aria-hidden="true" /></Link>}
+            {!signedIn && !signupEnabled && <div className="marketing-access-note"><p>Démo fictive, sans compte. Les inscriptions publiques sont fermées.</p><a href="https://wael-chatoui.vercel.app/?utm_source=la_redaction&utm_medium=referral&utm_campaign=tests_oct2026&utm_content=hero_test_access#contact">Demander un accès de test<ArrowUpRight aria-hidden="true" /></a></div>}
           </div>
 
-          <figure className="marketing-product">
-            <div className="marketing-product-window">
-              <div className="marketing-product-bar" aria-hidden="true">
-                <span className="marketing-product-dots"><i /><i /><i /></span>
-                <span>La Rédaction</span>
-                <span className="marketing-product-bar-spacer" />
-              </div>
-              <div className="marketing-product-crop">
-                {/* A real capture of the reading workspace, generated from this application. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src="/images/newsroom-preview.jpg"
-                  width="1440"
-                  height="1000"
-                  alt="L’espace de veille de La Rédaction, avec les sources RSS, les articles et le carnet de notes."
-                  fetchPriority="high"
-                />
-              </div>
-            </div>
-            <figcaption>Aperçu de l’application avec des données de démonstration.</figcaption>
-          </figure>
+          <EditorialScene />
         </section>
 
         <section id="fonctionnalites" className="marketing-workflow marketing-container" aria-labelledby="workflow-title">
           <div className="marketing-section-intro">
-            <h2 id="workflow-title">Lire, noter,<br />préparer.</h2>
+            <h2 id="workflow-title">Lire, noter, <br />préparer.</h2>
             <p>De l’article repéré au sujet à rédiger, gardez vos sources à portée de main.</p>
+            <details className="marketing-workspace-preview"><summary>Voir l’espace de travail</summary><figure>{/* eslint-disable-next-line @next/next/no-img-element */}<img src="/images/newsroom-preview.jpg" width="1440" height="1000" loading="lazy" alt="Aperçu réel de La Rédaction : navigation des sources RSS, liste des articles et carnet de notes, avec des données de démonstration." /><figcaption>Capture de l’application avec des données de démonstration.</figcaption></figure></details>
           </div>
 
           <div className="marketing-workflow-list">
@@ -95,7 +78,7 @@ export function LandingPage({ signedIn = false, signupEnabled = false, billingEn
         <section className="marketing-transfer" aria-labelledby="transfer-title">
           <div className="marketing-transfer-inner marketing-container">
             <div className="marketing-transfer-copy">
-              <h2 id="transfer-title">Emporter<br />votre travail.</h2>
+              <h2 id="transfer-title">Emporter <br />votre travail.</h2>
               <p>Importez vos sources et vos notes, ou exportez votre sélection dans un format réutilisable. Chaque import présente les changements avant confirmation.</p>
             </div>
             <div className="marketing-formats">
@@ -118,6 +101,10 @@ export function LandingPage({ signedIn = false, signupEnabled = false, billingEn
         <section className="marketing-faq marketing-container" aria-labelledby="faq-title">
           <h2 id="faq-title">Quelques précisions.</h2>
           <div className="marketing-faq-list">
+            <details>
+              <summary>Puis-je essayer sans créer de compte ?<span aria-hidden="true" className="marketing-faq-plus" /></summary>
+              <p>Oui. La <Link href="/demo">démonstration interactive</Link> permet de lire un exemple fictif, créer une note, choisir une date et télécharger cette note. Elle ne collecte pas vos sources et les essais disparaissent au rechargement. {signupEnabled ? 'Vous pouvez créer un espace privé pour travailler avec vos propres sources.' : 'Les inscriptions publiques sont fermées. Un accès de test peut être demandé à l’éditeur.'}</p>
+            </details>
             <details>
               <summary>Mes notes sont-elles privées ?<span aria-hidden="true" className="marketing-faq-plus" /></summary>
               <p>Chaque compte possède son propre espace de sources, d’articles et de notes. Vos contenus ne sont pas visibles depuis le compte d’un autre abonné.</p>

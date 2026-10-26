@@ -16,7 +16,7 @@ Thème clair uniquement, papier presque blanc, encre sombre, accent vert forêt.
 4. Le contenu avant les compteurs. Images et titres structurent la veille ; les chiffres restent contextuels.
 
 ## Contraintes
-Next.js 14, React 18, Tailwind et CSS, Lucide. Garder la base existante et ses flux de mode, sans imposer ce secteur aux nouveaux contenus. Le planning organise les sujets, sans prétendre les publier automatiquement.
+Next.js 15.5, React 18, Tailwind et CSS, Lucide. Garder la base existante et ses flux de mode, sans imposer ce secteur aux nouveaux contenus. Le planning organise les sujets, sans prétendre les publier automatiquement.
 
 ## Contraintes apprises
 - 2026-10-15 : refonte complète demandée, UX et direction artistique existantes rejetées. Thème clair seulement.
@@ -40,3 +40,7 @@ Import / export : choix du contenu, du format et de la sélection. L’import pr
 - Veille et sélection conservent leur recherche, leurs filtres et leur position. Sections, notes et lecteur ont une URL ; le retour navigateur suit le parcours.
 - Un sujet rassemble plusieurs références. Les extraits importés restent séparés de l’angle et du texte de l’auteur. Le lecteur permet « Lu et suivant » et l’ajout à un sujet existant.
 - Recherche dans le texte intégral et les déclinaisons sociales, sources avec diagnostic persistant, calendrier avec bac « À planifier ». Le cache se lit avant la collecte distante.
+
+## Présentation publique du parcours
+- 2026-10-26 : le hero présente un fil éditorial source → note sourcée → sujet sur papier. L’exemple est explicitement fictif. Progression CSS finie, texte rendu sur le serveur, aucun ralentissement de l’espace de travail. Mobile et réduction des animations gardent un état statique complet.
+- La capture réelle du produit reste disponible dans « Voir l’espace de travail ». Les inscriptions fermées et la limite de la démonstration sont expliquées près du premier CTA ; le lien d’accès de test conduit à l’éditeur.

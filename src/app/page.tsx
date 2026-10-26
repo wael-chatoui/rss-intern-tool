@@ -1,5 +1,8 @@
 import { LandingPage } from '@/components/Marketing/LandingPage';
 import { getCurrentOwner } from '@/lib/auth';
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = { alternates: { canonical: '/' } };
 
 export const dynamic = 'force-dynamic';
 

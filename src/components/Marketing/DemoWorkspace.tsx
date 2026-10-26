@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, ArrowUpRight, CalendarDays, Download, FileText, NotebookPen, RotateCcw } from 'lucide-react';
 import './demo.css';
@@ -13,6 +13,13 @@ export function DemoWorkspace({ signupEnabled }: { signupEnabled: boolean }) {
   const [date, setDate] = useState('');
   const [status, setStatus] = useState('idea');
   const [notice, setNotice] = useState('');
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const previousStep = useRef('source:false');
+  useEffect(() => {
+    const step = `${view}:${created}`;
+    if (previousStep.current !== step) canvasRef.current?.focus();
+    previousStep.current = step;
+  }, [view, created]);
   function create() { setCreated(true); setView('note'); setNotice('La référence est conservée avec votre note.'); }
   function reset() { setCreated(false); setTitle('Mon premier sujet'); setText(''); setDate(''); setStatus('idea'); setView('source');setNotice('La démonstration a été réinitialisée.'); }
   function download() {
@@ -28,7 +35,7 @@ export function DemoWorkspace({ signupEnabled }: { signupEnabled: boolean }) {
         <button className={view === 'note' ? 'active' : ''} aria-current={view === 'note' ? 'step' : undefined} onClick={() => setView('note')}><NotebookPen aria-hidden="true" />Préparer ma note</button>
         <button className={view === 'planning' ? 'active' : ''} aria-current={view === 'planning' ? 'step' : undefined} onClick={() => setView('planning')}><CalendarDays aria-hidden="true" />Planifier le sujet</button>
       </nav>
-      <div className="demo-canvas">
+      <div className="demo-canvas" ref={canvasRef} tabIndex={-1} role="region" aria-label={view === 'source' ? 'Lire la source' : view === 'note' ? 'Préparer ma note' : 'Planifier le sujet'}>
         {view === 'source' && <article className="demo-reading"><p className="demo-source-label">Article fictif de démonstration</p><h2>Transformer une lecture en sujet</h2><p>Une information repérée peut devenir un angle à explorer. Conservez la référence avec votre note, puis complétez-la avec votre analyse et les autres sources utiles.</p><p>Dans l’application, les extraits et les liens restent séparés de votre propre texte. Vous retrouvez ainsi l’origine d’une idée pendant la rédaction.</p><button className="btn btn-primary" onClick={create}>{created ? 'Revenir à ma note' : 'Créer une note depuis cette source'}<ArrowRight aria-hidden="true" /></button></article>}
         {view === 'note' && (!created ? <div className="demo-empty"><h2>Votre carnet commence ici.</h2><p>Créez votre première note. La référence de démonstration y sera attachée.</p><button className="btn btn-primary" onClick={create}>Créer ma note</button></div> : <section className="demo-editor" aria-label="Note de démonstration"><label htmlFor="demo-title">Mon angle</label><input className="field demo-title" id="demo-title" value={title} onChange={event => setTitle(event.target.value)} maxLength={200} /><div className="demo-reference"><strong>Référence conservée</strong><p>Transformer une lecture en sujet</p><span>Article fictif de démonstration</span></div><label htmlFor="demo-text">Mes notes</label><textarea className="field" id="demo-text" value={text} onChange={event => setText(event.target.value)} placeholder="Développez votre angle, notez vos questions et les faits à vérifier…" rows={8} maxLength={20000} /><div className="demo-editor-actions"><button className="btn btn-secondary" onClick={download}><Download aria-hidden="true" />Télécharger ma note</button><button className="btn btn-primary" onClick={() => setView('planning')}>Planifier ce sujet<ArrowRight aria-hidden="true" /></button></div></section>)}
         {view === 'planning' && (!created ? <div className="demo-empty"><h2>Préparez d’abord votre sujet.</h2><p>Une note peut recevoir une date et un statut dans le planning.</p><button className="btn btn-primary" onClick={create}>Créer ma première note</button></div> : <section className="demo-plan"><h2>{title || 'Sujet sans titre'}</h2><p>Organisez votre travail. Le planning ne publie rien sur les réseaux sociaux.</p><div className="demo-plan-fields"><label htmlFor="demo-date">Date prévue<input className="field" id="demo-date" type="date" value={date} onInput={event => { setDate(event.currentTarget.value);setNotice('La date de votre sujet a été mise à jour dans cette démonstration.'); }} onChange={event => setDate(event.target.value)} /></label><label htmlFor="demo-status">Statut<select className="field" id="demo-status" value={status} onChange={event => setStatus(event.target.value)}><option value="idea">Idée</option><option value="in_progress">En rédaction</option><option value="ready">Prêt</option><option value="published">Publié</option></select></label></div><p className="demo-planned-result">{date ? `Prévu le ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long', timeZone: 'Europe/Paris' }).format(new Date(`${date}T12:00:00Z`))}` : 'Ce sujet est dans le bac « À planifier ».'}</p><button className="btn btn-secondary" onClick={() => setView('note')}>Revenir à ma note</button></section>)}

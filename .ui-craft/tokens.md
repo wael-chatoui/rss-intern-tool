@@ -7,5 +7,6 @@
 - Rayons : 6 px contrôles, 10 px articles, 14 px dialogues.
 - Ombres : deux couches légères sur dialogues ; contenu principal délimité par espacement et bordures.
 - Mouvement : couleurs 150 ms, dialogues 200 ms ; respecter reduced-motion.
+- Présentation publique seulement : arrivée des feuilles 600 ms, décalage 600 ms, tracé du fil 2 400 ms, easing cubic-bezier(.22, 1, .36, 1). Une seule lecture, sans boucle ; mobile et reduced-motion statiques. Aucun mouvement ajouté au parcours de travail.
 - Z-index : navigation mobile 30, dialogue 50, notification 80.
 - Contrôles communs : .btn, .btn-primary, .btn-secondary, .btn-ghost, .icon-btn, .field.
