@@ -30,6 +30,10 @@
 .demo-plan-fields .field { margin-block-start: .625rem; font-size: 1rem; min-height: 3rem; }
 .demo-planned-result { background: var(--brand-soft); padding: 1.25rem; color: var(--brand); border-radius: 6px; }
 .demo-foot { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between; margin-block: 1rem 3rem; color: var(--ink-muted); font-size: .875rem; }
+.demo-reset-confirmation { margin-block-start: 1rem; padding: 1.25rem; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.demo-reset-confirmation h2 { font-weight: 600; }
+.demo-reset-confirmation p { margin-block: .75rem 1rem; max-width: 65ch; color: var(--ink-muted); line-height: 1.75; }
+.demo-reset-confirmation > div { display: flex; flex-wrap: wrap; gap: .75rem; }
 .demo-footer { padding-block: 2rem; border-block-start: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 1rem 3rem; justify-content: space-between; }
 .demo-footer p { max-width: 50ch; }
 .demo-footer a { display: inline-flex; align-items: center; gap: .75rem; color: var(--brand); text-underline-offset: .2em; }
